@@ -4095,6 +4095,11 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   const SanitizerArgs &Sanitize = getToolChain().getSanitizerArgs();
   Sanitize.addArgs(getToolChain(), Args, CmdArgs, InputType);
 
+  // ANGE XXX
+  if (Args.hasArg(options::OPT_fopenkimono)) {
+    Args.AddLastArg(CmdArgs, options::OPT_fopenkimono);
+  }
+
   // Report an error for -faltivec on anything other than PowerPC.
   if (const Arg *A = Args.getLastArg(options::OPT_faltivec)) {
     const llvm::Triple::ArchType Arch = getToolChain().getArch();

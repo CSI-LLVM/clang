@@ -244,6 +244,13 @@ static void addDataFlowSanitizerPass(const PassManagerBuilder &Builder,
   PM.add(createDataFlowSanitizerPass(LangOpts.SanitizerBlacklistFiles));
 }
 
+// ANGE XXX: Maybe make the option fancier later
+static void addOpenKimonoPass(const PassManagerBuilder &Builder,
+                              PassManagerBase &PM) {
+  // possibly add other passes?
+  PM.add(createOpenKimonoFunctionPass());
+}
+
 static TargetLibraryInfoImpl *createTLII(llvm::Triple &TargetTriple,
                                          const CodeGenOptions &CodeGenOpts) {
   TargetLibraryInfoImpl *TLII = new TargetLibraryInfoImpl(TargetTriple);
@@ -364,6 +371,14 @@ void EmitAssemblyHelper::CreatePasses() {
                            addDataFlowSanitizerPass);
     PMBuilder.addExtension(PassManagerBuilder::EP_EnabledOnOptLevel0,
                            addDataFlowSanitizerPass);
+  }
+
+// ANGE XXX: Let's always add it for now
+  if (LangOpts.OpenKimono) {
+    PMBuilder.addExtension(PassManagerBuilder::EP_OptimizerLast,
+                           addOpenKimonoPass);
+    PMBuilder.addExtension(PassManagerBuilder::EP_EnabledOnOptLevel0,
+                           addOpenKimonoPass);
   }
 
   // Figure out TargetLibraryInfo.

@@ -228,6 +228,8 @@ LANGOPT(RetainCommentsFromSystemHeaders, 1, 0, "retain documentation comments fr
 LANGOPT(SanitizeAddressFieldPadding, 2, 0, "controls how aggressive is ASan "
                                            "field padding (0: none, 1:least "
                                            "aggressive, 2: more aggressive)")
+// ANGE XXX: Need to change this if we add more options
+LANGOPT(OpenKimono, 1, 0, "Turn on OpenKimono instrumentations.")
 
 #undef LANGOPT
 #undef COMPATIBLE_LANGOPT

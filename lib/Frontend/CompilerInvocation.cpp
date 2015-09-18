@@ -1704,6 +1704,9 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   Opts.SanitizeAddressFieldPadding =
       getLastArgIntValue(Args, OPT_fsanitize_address_field_padding, 0, Diags);
   Opts.SanitizerBlacklistFiles = Args.getAllArgValues(OPT_fsanitize_blacklist);
+
+  // ANGE XXX: change the option name later; also possibly add more options
+  Opts.OpenKimono = Args.hasArg(OPT_fopenkimono);
 }
 
 static void ParsePreprocessorArgs(PreprocessorOptions &Opts, ArgList &Args,
@@ -1899,6 +1902,12 @@ bool CompilerInvocation::CreateFromArgs(CompilerInvocation &Res,
       Res.getLangOpts()->ObjCAutoRefCount = 1;
     parseSanitizerKinds("-fsanitize=", Args.getAllArgValues(OPT_fsanitize_EQ),
                         Diags, Res.getLangOpts()->Sanitize);
+
+    // ANGE XXX: change the option name later; also possibly add more options
+    // Added it here, because we want to add instrumentation even if the input
+    // is just LLVM IR, for testing purpose
+    Res.getLangOpts()->OpenKimono = Args.hasArg(OPT_fopenkimono);
+
   } else {
     // Other LangOpts are only initialzed when the input is not AST or LLVM IR.
     ParseLangArgs(*Res.getLangOpts(), Args, DashX, Diags);
