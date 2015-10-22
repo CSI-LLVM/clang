@@ -1706,7 +1706,7 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   Opts.SanitizerBlacklistFiles = Args.getAllArgValues(OPT_fsanitize_blacklist);
 
   // ANGE XXX: change the option name later; also possibly add more options
-  Opts.OpenKimono = Args.hasArg(OPT_fopenkimono);
+  Opts.CodeSpectatorInterface = Args.hasArg(OPT_fcsi);
 }
 
 static void ParsePreprocessorArgs(PreprocessorOptions &Opts, ArgList &Args,
@@ -1906,7 +1906,7 @@ bool CompilerInvocation::CreateFromArgs(CompilerInvocation &Res,
     // ANGE XXX: change the option name later; also possibly add more options
     // Added it here, because we want to add instrumentation even if the input
     // is just LLVM IR, for testing purpose
-    Res.getLangOpts()->OpenKimono = Args.hasArg(OPT_fopenkimono);
+    Res.getLangOpts()->CodeSpectatorInterface = Args.hasArg(OPT_fcsi);
 
   } else {
     // Other LangOpts are only initialzed when the input is not AST or LLVM IR.

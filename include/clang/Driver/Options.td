@@ -539,9 +539,9 @@ def fbracket_depth_EQ : Joined<["-"], "fbracket-depth=">, Group<f_Group>;
 def fsignaling_math : Flag<["-"], "fsignaling-math">, Group<f_Group>;
 def fno_signaling_math : Flag<["-"], "fno-signaling-math">, Group<f_Group>;
 // ANGE XXX: add other options later
-def fopenkimono : Flag<["-"], "fopenkimono">, Group<f_clang_Group>,
+def fcsi : Flag<["-"], "fcsi">, Group<f_clang_Group>,
                   Flags<[CC1Option, CoreOption]>, MetaVarName<"<check>">,
-                  HelpText<"Turn on compilation of OpenKimono instrumentation.">;
+                  HelpText<"Turn on compilation of CodeSpectatorInterface instrumentation.">;
 
 def fsanitize_EQ : CommaJoined<["-"], "fsanitize=">, Group<f_clang_Group>,
                    Flags<[CC1Option, CoreOption]>, MetaVarName<"<check>">,

@@ -245,10 +245,10 @@ static void addDataFlowSanitizerPass(const PassManagerBuilder &Builder,
 }
 
 // ANGE XXX: Maybe make the option fancier later
-static void addOpenKimonoPass(const PassManagerBuilder &Builder,
+static void addCodeSpectatorInterfacePass(const PassManagerBuilder &Builder,
                               PassManagerBase &PM) {
   // possibly add other passes?
-  PM.add(createOpenKimonoFunctionPass());
+  PM.add(createCodeSpectatorInterfacePass());
 }
 
 static TargetLibraryInfoImpl *createTLII(llvm::Triple &TargetTriple,
@@ -374,11 +374,11 @@ void EmitAssemblyHelper::CreatePasses() {
   }
 
 // ANGE XXX: Let's always add it for now
-  if (LangOpts.OpenKimono) {
+  if (LangOpts.CodeSpectatorInterface) {
     PMBuilder.addExtension(PassManagerBuilder::EP_OptimizerLast,
-                           addOpenKimonoPass);
+                           addCodeSpectatorInterfacePass);
     PMBuilder.addExtension(PassManagerBuilder::EP_EnabledOnOptLevel0,
-                           addOpenKimonoPass);
+                           addCodeSpectatorInterfacePass);
   }
 
   // Figure out TargetLibraryInfo.

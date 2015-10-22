@@ -4096,8 +4096,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   Sanitize.addArgs(getToolChain(), Args, CmdArgs, InputType);
 
   // ANGE XXX
-  if (Args.hasArg(options::OPT_fopenkimono)) {
-    Args.AddLastArg(CmdArgs, options::OPT_fopenkimono);
+  if (Args.hasArg(options::OPT_fcsi)) {
+    Args.AddLastArg(CmdArgs, options::OPT_fcsi);
   }
 
   // Report an error for -faltivec on anything other than PowerPC.
