@@ -327,7 +327,7 @@ struct Str {
 };
 
 extern char externalvar[];
-constexpr bool constaddress = (void *)externalvar == (void *)0x4000UL; // expected-error {{must be initialized by a constant expression}}
+constexpr bool constaddress = (void *)externalvar == (void *)0x4000UL; // expected-error {{must be initialized by a constant expression}} expected-note {{reinterpret_cast}}
 constexpr bool litaddress = "foo" == "foo"; // expected-error {{must be initialized by a constant expression}} expected-warning {{unspecified}}
 static_assert(0 != "foo", "");
 
@@ -1181,6 +1181,20 @@ namespace ExternConstexpr {
     constexpr int j = 0;
     constexpr int k; // expected-error {{default initialization of an object of const type}}
   }
+
+  extern const int q;
+  constexpr int g() { return q; }
+  constexpr int q = g();
+  static_assert(q == 0, "zero-initialization should precede static initialization");
+
+  extern int r; // expected-note {{here}}
+  constexpr int h() { return r; } // expected-error {{never produces a constant}} expected-note {{read of non-const}}
+
+  struct S { int n; };
+  extern const S s;
+  constexpr int x() { return s.n; }
+  constexpr S s = {x()};
+  static_assert(s.n == 0, "zero-initialization should precede static initialization");
 }
 
 namespace ComplexConstexpr {
@@ -1802,8 +1816,8 @@ namespace Bitfields {
     unsigned u : 5;
     int n : 5;
     bool b2 : 3;
-    unsigned u2 : 74; // expected-warning {{exceeds the size of its type}}
-    int n2 : 81; // expected-warning {{exceeds the size of its type}}
+    unsigned u2 : 74; // expected-warning {{exceeds the width of its type}}
+    int n2 : 81; // expected-warning {{exceeds the width of its type}}
   };
 
   constexpr A a = { false, 33, 31, false, 0xffffffff, 0x7fffffff }; // expected-warning 2{{truncation}}
@@ -1874,10 +1888,9 @@ namespace NeverConstantTwoWays {
         0;
   }
 
-  // FIXME: We should diagnose the cast to long here, not the division by zero.
   constexpr int n = // expected-error {{must be initialized by a constant expression}}
-      (int *)(long)&n == &n ?
-        1 / 0 : // expected-warning {{division by zero}} expected-note {{division by zero}}
+      (int *)(long)&n == &n ? // expected-note {{reinterpret_cast}}
+        1 / 0 : // expected-warning {{division by zero}}
         0;
 }
 
@@ -1993,4 +2006,26 @@ namespace PR17938 {
   struct Z : Y { constexpr Z() {} };
 
   static constexpr auto z = f(Z());
+}
+
+namespace PR24597 {
+  struct A {
+    int x, *p;
+    constexpr A() : x(0), p(&x) {}
+    constexpr A(const A &a) : x(a.x), p(&x) {}
+  };
+  constexpr A f() { return A(); }
+  constexpr A g() { return f(); }
+  constexpr int a = *f().p;
+  constexpr int b = *g().p;
+}
+
+namespace IncompleteClass {
+  struct XX {
+    static constexpr int f(XX*) { return 1; } // expected-note {{here}}
+    friend constexpr int g(XX*) { return 2; } // expected-note {{here}}
+
+    static constexpr int i = f(static_cast<XX*>(nullptr)); // expected-error {{constexpr variable 'i' must be initialized by a constant expression}}  expected-note {{undefined function 'f' cannot be used in a constant expression}}
+    static constexpr int j = g(static_cast<XX*>(nullptr)); // expected-error {{constexpr variable 'j' must be initialized by a constant expression}}  expected-note {{undefined function 'g' cannot be used in a constant expression}}
+  };
 }

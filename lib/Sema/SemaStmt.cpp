@@ -37,6 +37,7 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
+
 using namespace clang;
 using namespace sema;
 
@@ -195,7 +196,7 @@ void Sema::DiagnoseUnusedExprResult(const Stmt *S) {
   if (isUnevaluatedContext())
     return;
 
-  SourceLocation ExprLoc = E->IgnoreParens()->getExprLoc();
+  SourceLocation ExprLoc = E->IgnoreParenImpCasts()->getExprLoc();
   // In most cases, we don't want to warn if the expression is written in a
   // macro body, or if the macro comes from a system header. If the offending
   // expression is a call to a function with the warn_unused_result attribute,
@@ -217,6 +218,15 @@ void Sema::DiagnoseUnusedExprResult(const Stmt *S) {
   // false positive.
   if (isa<StmtExpr>(E) && Loc.isMacroID())
     return;
+
+  // Check if this is the UNREFERENCED_PARAMETER from the Microsoft headers.
+  // That macro is frequently used to suppress "unused parameter" warnings,
+  // but its implementation makes clang's -Wunused-value fire.  Prevent this.
+  if (isa<ParenExpr>(E->IgnoreImpCasts()) && Loc.isMacroID()) {
+    SourceLocation SpellLoc = Loc;
+    if (findMacroSpelling(SpellLoc, "UNREFERENCED_PARAMETER"))
+      return;
+  }
 
   // Okay, we have an unused result.  Depending on what the base expression is,
   // we might want to make a more specific diagnostic.  Check for one of these
@@ -240,10 +250,10 @@ void Sema::DiagnoseUnusedExprResult(const Stmt *S) {
     // is written in a macro body, only warn if it has the warn_unused_result
     // attribute.
     if (const Decl *FD = CE->getCalleeDecl()) {
-      const FunctionDecl *Func = dyn_cast<FunctionDecl>(FD);
-      if (Func ? Func->hasUnusedResultAttr()
-               : FD->hasAttr<WarnUnusedResultAttr>()) {
-        Diag(Loc, diag::warn_unused_result) << R1 << R2;
+      if (const Attr *A = isa<FunctionDecl>(FD)
+                              ? cast<FunctionDecl>(FD)->getUnusedResultAttr()
+                              : FD->getAttr<WarnUnusedResultAttr>()) {
+        Diag(Loc, diag::warn_unused_result) << A << R1 << R2;
         return;
       }
       if (ShouldSuppress)
@@ -267,8 +277,8 @@ void Sema::DiagnoseUnusedExprResult(const Stmt *S) {
     }
     const ObjCMethodDecl *MD = ME->getMethodDecl();
     if (MD) {
-      if (MD->hasAttr<WarnUnusedResultAttr>()) {
-        Diag(Loc, diag::warn_unused_result) << R1 << R2;
+      if (const auto *A = MD->getAttr<WarnUnusedResultAttr>()) {
+        Diag(Loc, diag::warn_unused_result) << A << R1 << R2;
         return;
       }
     }
@@ -479,17 +489,24 @@ StmtResult Sema::ActOnAttributedStmt(SourceLocation AttrLoc,
   return LS;
 }
 
+namespace {
+class CommaVisitor : public EvaluatedExprVisitor<CommaVisitor> {
+  typedef EvaluatedExprVisitor<CommaVisitor> Inherited;
+  Sema &SemaRef;
+public:
+  CommaVisitor(Sema &SemaRef) : Inherited(SemaRef.Context), SemaRef(SemaRef) {}
+  void VisitBinaryOperator(BinaryOperator *E) {
+    if (E->getOpcode() == BO_Comma)
+      SemaRef.DiagnoseCommaOperator(E->getLHS(), E->getExprLoc());
+    EvaluatedExprVisitor<CommaVisitor>::VisitBinaryOperator(E);
+  }
+};
+}
+
 StmtResult
 Sema::ActOnIfStmt(SourceLocation IfLoc, FullExprArg CondVal, Decl *CondVar,
                   Stmt *thenStmt, SourceLocation ElseLoc,
                   Stmt *elseStmt) {
-  // If the condition was invalid, discard the if statement.  We could recover
-  // better by replacing it with a valid expr, but don't do that yet.
-  if (!CondVal.get() && !CondVar) {
-    getCurFunction()->setHasDroppedStmt();
-    return StmtError();
-  }
-
   ExprResult CondResult(CondVal.release());
 
   VarDecl *ConditionVar = nullptr;
@@ -497,21 +514,27 @@ Sema::ActOnIfStmt(SourceLocation IfLoc, FullExprArg CondVal, Decl *CondVar,
     ConditionVar = cast<VarDecl>(CondVar);
     CondResult = CheckConditionVariable(ConditionVar, IfLoc, true);
     CondResult = ActOnFinishFullExpr(CondResult.get(), IfLoc);
-    if (CondResult.isInvalid())
-      return StmtError();
   }
   Expr *ConditionExpr = CondResult.getAs<Expr>();
-  if (!ConditionExpr)
-    return StmtError();
+  if (ConditionExpr) {
 
-  DiagnoseUnusedExprResult(thenStmt);
+    if (!Diags.isIgnored(diag::warn_comma_operator,
+                         ConditionExpr->getExprLoc()))
+      CommaVisitor(*this).Visit(ConditionExpr);
 
-  if (!elseStmt) {
-    DiagnoseEmptyStmtBody(ConditionExpr->getLocEnd(), thenStmt,
-                          diag::warn_empty_if_body);
+    DiagnoseUnusedExprResult(thenStmt);
+
+    if (!elseStmt) {
+      DiagnoseEmptyStmtBody(ConditionExpr->getLocEnd(), thenStmt,
+                            diag::warn_empty_if_body);
+    }
+
+    DiagnoseUnusedExprResult(elseStmt);
+  } else {
+    // Create a dummy Expr for the condition for error recovery
+    ConditionExpr = new (Context) OpaqueValueExpr(SourceLocation(),
+                                                  Context.BoolTy, VK_RValue);
   }
-
-  DiagnoseUnusedExprResult(elseStmt);
 
   return new (Context) IfStmt(Context, IfLoc, ConditionVar, ConditionExpr,
                               thenStmt, ElseLoc, elseStmt);
@@ -698,8 +721,6 @@ static bool ShouldDiagnoseSwitchCaseNotInEnum(const Sema &S,
                                               EnumValsTy::iterator &EI,
                                               EnumValsTy::iterator &EIEnd,
                                               const llvm::APSInt &Val) {
-  bool FlagType = ED->hasAttr<FlagEnumAttr>();
-
   if (const DeclRefExpr *DRE =
           dyn_cast<DeclRefExpr>(CaseExpr->IgnoreParenImpCasts())) {
     if (const VarDecl *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
@@ -711,7 +732,7 @@ static bool ShouldDiagnoseSwitchCaseNotInEnum(const Sema &S,
     }
   }
 
-  if (FlagType) {
+  if (ED->hasAttr<FlagEnumAttr>()) {
     return !S.IsValueInFlagEnum(ED, Val, false);
   } else {
     while (EI != EIEnd && EI->first < Val)
@@ -979,7 +1000,8 @@ Sema::ActOnFinishSwitchStmt(SourceLocation SwitchLoc, Stmt *Switch,
             << SourceRange(CR->getLHS()->getLocStart(),
                            Hi->getLocEnd());
           CaseRanges.erase(CaseRanges.begin()+i);
-          --i, --e;
+          --i;
+          --e;
           continue;
         }
 
@@ -1238,6 +1260,10 @@ Sema::ActOnWhileStmt(SourceLocation WhileLoc, FullExprArg Cond,
     return StmtError();
   CheckBreakContinueBinding(ConditionExpr);
 
+  if (ConditionExpr &&
+      !Diags.isIgnored(diag::warn_comma_operator, ConditionExpr->getExprLoc()))
+    CommaVisitor(*this).Visit(ConditionExpr);
+
   DiagnoseUnusedExprResult(Body);
 
   if (isa<NullStmt>(Body))
@@ -1349,7 +1375,7 @@ namespace {
 
   }; // end class DeclExtractor
 
-  // DeclMatcher checks to see if the decls are used in a non-evauluated
+  // DeclMatcher checks to see if the decls are used in a non-evaluated
   // context.
   class DeclMatcher : public EvaluatedExprVisitor<DeclMatcher> {
     llvm::SmallPtrSetImpl<VarDecl*> &Decls;
@@ -1413,6 +1439,18 @@ namespace {
       if (VarDecl *VD = dyn_cast<VarDecl>(E->getDecl()))
         if (Decls.count(VD))
           FoundDecl = true;
+    }
+
+    void VisitPseudoObjectExpr(PseudoObjectExpr *POE) {
+      // Only need to visit the semantics for POE.
+      // SyntaticForm doesn't really use the Decal.
+      for (auto *S : POE->semantics()) {
+        if (auto *OVE = dyn_cast<OpaqueValueExpr>(S))
+          // Look past the OVE into the expression it binds.
+          Visit(OVE->getSourceExpr());
+        else
+          Visit(S);
+      }
     }
 
     bool FoundDeclInUse() { return FoundDecl; }
@@ -1640,6 +1678,11 @@ Sema::ActOnForStmt(SourceLocation ForLoc, SourceLocation LParenLoc,
       return StmtError();
   }
 
+  if (SecondResult.get() &&
+      !Diags.isIgnored(diag::warn_comma_operator,
+                       SecondResult.get()->getExprLoc()))
+    CommaVisitor(*this).Visit(SecondResult.get());
+
   Expr *Third  = third.release().getAs<Expr>();
 
   DiagnoseUnusedExprResult(First);
@@ -1705,11 +1748,10 @@ Sema::CheckObjCForCollectionOperand(SourceLocation forLoc, Expr *collection) {
   // If we have a forward-declared type, we can't do this check.
   // Under ARC, it is an error not to have a forward-declared class.
   if (iface &&
-      RequireCompleteType(forLoc, QualType(objectType, 0),
-                          getLangOpts().ObjCAutoRefCount
-                            ? diag::err_arc_collection_forward
-                            : 0,
-                          collection)) {
+      (getLangOpts().ObjCAutoRefCount
+           ? RequireCompleteType(forLoc, QualType(objectType, 0),
+                                 diag::err_arc_collection_forward, collection)
+           : !isCompleteType(forLoc, QualType(objectType, 0)))) {
     // Otherwise, if we have any useful type information, check that
     // the type declares the appropriate method.
   } else if (iface || !objectType->qual_empty()) {
@@ -1867,13 +1909,19 @@ static bool FinishForRangeVarDecl(Sema &SemaRef, VarDecl *Decl, Expr *Init,
 }
 
 namespace {
+// An enum to represent whether something is dealing with a call to begin()
+// or a call to end() in a range-based for loop.
+enum BeginEndFunction {
+  BEF_begin,
+  BEF_end
+};
 
 /// Produce a note indicating which begin/end function was implicitly called
 /// by a C++11 for-range statement. This is often not obvious from the code,
 /// nor from the diagnostics produced when analysing the implicit expressions
 /// required in a for-range statement.
 void NoteForRangeBeginEndFunction(Sema &SemaRef, Expr *E,
-                                  Sema::BeginEndFunction BEF) {
+                                  BeginEndFunction BEF) {
   CallExpr *CE = dyn_cast<CallExpr>(E);
   if (!CE)
     return;
@@ -1931,10 +1979,11 @@ static bool ObjCEnumerationCollection(Expr *Collection) {
 ///
 /// The body of the loop is not available yet, since it cannot be analysed until
 /// we have determined the type of the for-range-declaration.
-StmtResult
-Sema::ActOnCXXForRangeStmt(SourceLocation ForLoc,
-                           Stmt *First, SourceLocation ColonLoc, Expr *Range,
-                           SourceLocation RParenLoc, BuildForRangeKind Kind) {
+StmtResult Sema::ActOnCXXForRangeStmt(Scope *S, SourceLocation ForLoc,
+                                      SourceLocation CoawaitLoc, Stmt *First,
+                                      SourceLocation ColonLoc, Expr *Range,
+                                      SourceLocation RParenLoc,
+                                      BuildForRangeKind Kind) {
   if (!First)
     return StmtError();
 
@@ -1954,6 +2003,13 @@ Sema::ActOnCXXForRangeStmt(SourceLocation ForLoc,
       DiagnoseUnexpandedParameterPack(Range, UPPC_Expression)) {
     LoopVar->setInvalidDecl();
     return StmtError();
+  }
+
+  // Coroutines: 'for co_await' implicitly co_awaits its range.
+  if (CoawaitLoc.isValid()) {
+    ExprResult Coawait = ActOnCoawaitExpr(S, CoawaitLoc, Range);
+    if (Coawait.isInvalid()) return StmtError();
+    Range = Coawait.get();
   }
 
   // Build  auto && __range = range-init
@@ -1977,9 +2033,10 @@ Sema::ActOnCXXForRangeStmt(SourceLocation ForLoc,
     return StmtError();
   }
 
-  return BuildCXXForRangeStmt(ForLoc, ColonLoc, RangeDecl.get(),
-                              /*BeginEndDecl=*/nullptr, /*Cond=*/nullptr,
-                              /*Inc=*/nullptr, DS, RParenLoc, Kind);
+  return BuildCXXForRangeStmt(ForLoc, CoawaitLoc, ColonLoc, RangeDecl.get(),
+                              /*BeginStmt=*/nullptr, /*EndStmt=*/nullptr,
+                              /*Cond=*/nullptr, /*Inc=*/nullptr,
+                              DS, RParenLoc, Kind);
 }
 
 /// \brief Create the initialization, compare, and increment steps for
@@ -1991,7 +2048,7 @@ Sema::ActOnCXXForRangeStmt(SourceLocation ForLoc,
 /// BeginExpr and EndExpr are set and FRS_Success is returned on success;
 /// CandidateSet and BEF are set and some non-success value is returned on
 /// failure.
-static Sema::ForRangeStatus BuildNonArrayForRange(Sema &SemaRef, Scope *S,
+static Sema::ForRangeStatus BuildNonArrayForRange(Sema &SemaRef,
                                             Expr *BeginRange, Expr *EndRange,
                                             QualType RangeType,
                                             VarDecl *BeginVar,
@@ -2000,7 +2057,7 @@ static Sema::ForRangeStatus BuildNonArrayForRange(Sema &SemaRef, Scope *S,
                                             OverloadCandidateSet *CandidateSet,
                                             ExprResult *BeginExpr,
                                             ExprResult *EndExpr,
-                                            Sema::BeginEndFunction *BEF) {
+                                            BeginEndFunction *BEF) {
   DeclarationNameInfo BeginNameInfo(
       &SemaRef.PP.getIdentifierTable().get("begin"), ColonLoc);
   DeclarationNameInfo EndNameInfo(&SemaRef.PP.getIdentifierTable().get("end"),
@@ -2021,7 +2078,7 @@ static Sema::ForRangeStatus BuildNonArrayForRange(Sema &SemaRef, Scope *S,
 
     if (BeginMemberLookup.empty() != EndMemberLookup.empty()) {
       SourceLocation RangeLoc = BeginVar->getLocation();
-      *BEF = BeginMemberLookup.empty() ? Sema::BEF_end : Sema::BEF_begin;
+      *BEF = BeginMemberLookup.empty() ? BEF_end : BEF_begin;
 
       SemaRef.Diag(RangeLoc, diag::err_for_range_member_begin_end_mismatch)
           << RangeLoc << BeginRange->getType() << *BEF;
@@ -2035,29 +2092,35 @@ static Sema::ForRangeStatus BuildNonArrayForRange(Sema &SemaRef, Scope *S,
 
   }
 
-  *BEF = Sema::BEF_begin;
+  *BEF = BEF_begin;
   Sema::ForRangeStatus RangeStatus =
-      SemaRef.BuildForRangeBeginEndCall(S, ColonLoc, ColonLoc, BeginVar,
-                                        Sema::BEF_begin, BeginNameInfo,
+      SemaRef.BuildForRangeBeginEndCall(ColonLoc, ColonLoc, BeginNameInfo,
                                         BeginMemberLookup, CandidateSet,
                                         BeginRange, BeginExpr);
 
-  if (RangeStatus != Sema::FRS_Success)
+  if (RangeStatus != Sema::FRS_Success) {
+    if (RangeStatus == Sema::FRS_DiagnosticIssued)
+      SemaRef.Diag(BeginRange->getLocStart(), diag::note_in_for_range)
+          << ColonLoc << BEF_begin << BeginRange->getType();
     return RangeStatus;
+  }
   if (FinishForRangeVarDecl(SemaRef, BeginVar, BeginExpr->get(), ColonLoc,
                             diag::err_for_range_iter_deduction_failure)) {
     NoteForRangeBeginEndFunction(SemaRef, BeginExpr->get(), *BEF);
     return Sema::FRS_DiagnosticIssued;
   }
 
-  *BEF = Sema::BEF_end;
+  *BEF = BEF_end;
   RangeStatus =
-      SemaRef.BuildForRangeBeginEndCall(S, ColonLoc, ColonLoc, EndVar,
-                                        Sema::BEF_end, EndNameInfo,
+      SemaRef.BuildForRangeBeginEndCall(ColonLoc, ColonLoc, EndNameInfo,
                                         EndMemberLookup, CandidateSet,
                                         EndRange, EndExpr);
-  if (RangeStatus != Sema::FRS_Success)
+  if (RangeStatus != Sema::FRS_Success) {
+    if (RangeStatus == Sema::FRS_DiagnosticIssued)
+      SemaRef.Diag(EndRange->getLocStart(), diag::note_in_for_range)
+          << ColonLoc << BEF_end << EndRange->getType();
     return RangeStatus;
+  }
   if (FinishForRangeVarDecl(SemaRef, EndVar, EndExpr->get(), ColonLoc,
                             diag::err_for_range_iter_deduction_failure)) {
     NoteForRangeBeginEndFunction(SemaRef, EndExpr->get(), *BEF);
@@ -2071,6 +2134,7 @@ static Sema::ForRangeStatus BuildNonArrayForRange(Sema &SemaRef, Scope *S,
 /// and emit no diagnostics.
 static StmtResult RebuildForRangeWithDereference(Sema &SemaRef, Scope *S,
                                                  SourceLocation ForLoc,
+                                                 SourceLocation CoawaitLoc,
                                                  Stmt *LoopVarDecl,
                                                  SourceLocation ColonLoc,
                                                  Expr *Range,
@@ -2086,10 +2150,9 @@ static StmtResult RebuildForRangeWithDereference(Sema &SemaRef, Scope *S,
     if (AdjustedRange.isInvalid())
       return StmtResult();
 
-    StmtResult SR =
-      SemaRef.ActOnCXXForRangeStmt(ForLoc, LoopVarDecl, ColonLoc,
-                                   AdjustedRange.get(), RParenLoc,
-                                   Sema::BFRK_Check);
+    StmtResult SR = SemaRef.ActOnCXXForRangeStmt(
+        S, ForLoc, CoawaitLoc, LoopVarDecl, ColonLoc, AdjustedRange.get(),
+        RParenLoc, Sema::BFRK_Check);
     if (SR.isInvalid())
       return StmtResult();
   }
@@ -2099,8 +2162,8 @@ static StmtResult RebuildForRangeWithDereference(Sema &SemaRef, Scope *S,
   // case there are any other (non-fatal) problems with it.
   SemaRef.Diag(RangeLoc, diag::err_for_range_dereference)
     << Range->getType() << FixItHint::CreateInsertion(RangeLoc, "*");
-  return SemaRef.ActOnCXXForRangeStmt(ForLoc, LoopVarDecl, ColonLoc,
-                                      AdjustedRange.get(), RParenLoc,
+  return SemaRef.ActOnCXXForRangeStmt(S, ForLoc, CoawaitLoc, LoopVarDecl,
+                                      ColonLoc, AdjustedRange.get(), RParenLoc,
                                       Sema::BFRK_Rebuild);
 }
 
@@ -2122,10 +2185,20 @@ struct InvalidateOnErrorScope {
 
 /// BuildCXXForRangeStmt - Build or instantiate a C++11 for-range statement.
 StmtResult
-Sema::BuildCXXForRangeStmt(SourceLocation ForLoc, SourceLocation ColonLoc,
-                           Stmt *RangeDecl, Stmt *BeginEnd, Expr *Cond,
+Sema::BuildCXXForRangeStmt(SourceLocation ForLoc, SourceLocation CoawaitLoc,
+                           SourceLocation ColonLoc, Stmt *RangeDecl,
+                           Stmt *Begin, Stmt *End, Expr *Cond,
                            Expr *Inc, Stmt *LoopVarDecl,
                            SourceLocation RParenLoc, BuildForRangeKind Kind) {
+  // FIXME: This should not be used during template instantiation. We should
+  // pick up the set of unqualified lookup results for the != and + operators
+  // in the initial parse.
+  //
+  // Testcase (accepts-invalid):
+  //   template<typename T> void f() { for (auto x : T()) {} }
+  //   namespace N { struct X { X begin(); X end(); int operator*(); }; }
+  //   bool operator!=(N::X, N::X); void operator++(N::X);
+  //   void g() { f<N::X>(); }
   Scope *S = getCurScope();
 
   DeclStmt *RangeDS = cast<DeclStmt>(RangeDecl);
@@ -2140,7 +2213,8 @@ Sema::BuildCXXForRangeStmt(SourceLocation ForLoc, SourceLocation ColonLoc,
   InvalidateOnErrorScope Invalidate(*this, LoopVar,
                                     LoopVar->getType()->isUndeducedType());
 
-  StmtResult BeginEndDecl = BeginEnd;
+  StmtResult BeginDeclStmt = Begin;
+  StmtResult EndDeclStmt = End;
   ExprResult NotEqExpr = Cond, IncrExpr = Inc;
 
   if (RangeVarType->isDependentType()) {
@@ -2151,7 +2225,7 @@ Sema::BuildCXXForRangeStmt(SourceLocation ForLoc, SourceLocation ColonLoc,
     // them in properly when we instantiate the loop.
     if (!LoopVar->isInvalidDecl() && Kind != BFRK_Check)
       LoopVar->setType(SubstAutoType(LoopVar->getType(), Context.DependentTy));
-  } else if (!BeginEndDecl.get()) {
+  } else if (!BeginDeclStmt.get()) {
     SourceLocation RangeLoc = RangeVar->getLocation();
 
     const QualType RangeVarNonRefType = RangeVarType.getNonReferenceType();
@@ -2225,9 +2299,9 @@ Sema::BuildCXXForRangeStmt(SourceLocation ForLoc, SourceLocation ColonLoc,
     } else {
       OverloadCandidateSet CandidateSet(RangeLoc,
                                         OverloadCandidateSet::CSK_Normal);
-      Sema::BeginEndFunction BEFFailure;
+      BeginEndFunction BEFFailure;
       ForRangeStatus RangeStatus =
-          BuildNonArrayForRange(*this, S, BeginRangeRef.get(),
+          BuildNonArrayForRange(*this, BeginRangeRef.get(),
                                 EndRangeRef.get(), RangeType,
                                 BeginVar, EndVar, ColonLoc, &CandidateSet,
                                 &BeginExpr, &EndExpr, &BEFFailure);
@@ -2252,6 +2326,7 @@ Sema::BuildCXXForRangeStmt(SourceLocation ForLoc, SourceLocation ColonLoc,
         // If building the range failed, try dereferencing the range expression
         // unless a diagnostic was issued or the end function is problematic.
         StmtResult SR = RebuildForRangeWithDereference(*this, S, ForLoc,
+                                                       CoawaitLoc,
                                                        LoopVarDecl, ColonLoc,
                                                        Range, RangeLoc,
                                                        RParenLoc);
@@ -2275,20 +2350,21 @@ Sema::BuildCXXForRangeStmt(SourceLocation ForLoc, SourceLocation ColonLoc,
            "invalid range expression in for loop");
 
     // C++11 [dcl.spec.auto]p7: BeginType and EndType must be the same.
+    // C++1z removes this restriction.
     QualType BeginType = BeginVar->getType(), EndType = EndVar->getType();
     if (!Context.hasSameType(BeginType, EndType)) {
-      Diag(RangeLoc, diag::err_for_range_begin_end_types_differ)
-        << BeginType << EndType;
+      Diag(RangeLoc, getLangOpts().CPlusPlus1z
+                         ? diag::warn_for_range_begin_end_types_differ
+                         : diag::ext_for_range_begin_end_types_differ)
+          << BeginType << EndType;
       NoteForRangeBeginEndFunction(*this, BeginExpr.get(), BEF_begin);
       NoteForRangeBeginEndFunction(*this, EndExpr.get(), BEF_end);
     }
 
-    Decl *BeginEndDecls[] = { BeginVar, EndVar };
-    // Claim the type doesn't contain auto: we've already done the checking.
-    DeclGroupPtrTy BeginEndGroup =
-        BuildDeclaratorGroup(MutableArrayRef<Decl *>(BeginEndDecls, 2),
-                             /*TypeMayContainAuto=*/ false);
-    BeginEndDecl = ActOnDeclStmt(BeginEndGroup, ColonLoc, ColonLoc);
+    BeginDeclStmt =
+        ActOnDeclStmt(ConvertDeclToDeclGroup(BeginVar), ColonLoc, ColonLoc);
+    EndDeclStmt =
+        ActOnDeclStmt(ConvertDeclToDeclGroup(EndVar), ColonLoc, ColonLoc);
 
     const QualType BeginRefNonRefType = BeginType.getNonReferenceType();
     ExprResult BeginRef = BuildDeclRefExpr(BeginVar, BeginRefNonRefType,
@@ -2322,7 +2398,10 @@ Sema::BuildCXXForRangeStmt(SourceLocation ForLoc, SourceLocation ColonLoc,
       return StmtError();
 
     IncrExpr = ActOnUnaryOp(S, ColonLoc, tok::plusplus, BeginRef.get());
-    IncrExpr = ActOnFinishFullExpr(IncrExpr.get());
+    if (!IncrExpr.isInvalid() && CoawaitLoc.isValid())
+      IncrExpr = ActOnCoawaitExpr(S, CoawaitLoc, IncrExpr.get());
+    if (!IncrExpr.isInvalid())
+      IncrExpr = ActOnFinishFullExpr(IncrExpr.get());
     if (IncrExpr.isInvalid()) {
       Diag(RangeLoc, diag::note_for_range_invalid_iterator)
         << RangeLoc << 2 << BeginRangeRef.get()->getType() ;
@@ -2360,8 +2439,10 @@ Sema::BuildCXXForRangeStmt(SourceLocation ForLoc, SourceLocation ColonLoc,
     return StmtResult();
 
   return new (Context) CXXForRangeStmt(
-      RangeDS, cast_or_null<DeclStmt>(BeginEndDecl.get()), NotEqExpr.get(),
-      IncrExpr.get(), LoopVarDS, /*Body=*/nullptr, ForLoc, ColonLoc, RParenLoc);
+      RangeDS, cast_or_null<DeclStmt>(BeginDeclStmt.get()),
+      cast_or_null<DeclStmt>(EndDeclStmt.get()), NotEqExpr.get(),
+      IncrExpr.get(), LoopVarDS, /*Body=*/nullptr, ForLoc, CoawaitLoc,
+      ColonLoc, RParenLoc);
 }
 
 /// FinishObjCForCollectionStmt - Attach the body to a objective-C foreach
@@ -2919,6 +3000,9 @@ Sema::ActOnCapScopeReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
   if (CurCap->HasImplicitReturnType || NRVOCandidate)
     FunctionScopes.back()->Returns.push_back(Result);
 
+  if (FunctionScopes.back()->FirstReturnLoc.isInvalid())
+    FunctionScopes.back()->FirstReturnLoc = ReturnLoc;
+
   return Result;
 }
 
@@ -2989,14 +3073,9 @@ bool Sema::DeduceFunctionTypeFromReturnExpr(FunctionDecl *FD,
     //   statement with a non-type-dependent operand.
     assert(AT->isDeduced() && "should have deduced to dependent type");
     return false;
-  } else if (RetExpr) {
-    //  If the deduction is for a return statement and the initializer is
-    //  a braced-init-list, the program is ill-formed.
-    if (isa<InitListExpr>(RetExpr)) {
-      Diag(RetExpr->getExprLoc(), diag::err_auto_fn_return_init_list);
-      return true;
-    }
+  } 
 
+  if (RetExpr) {
     //  Otherwise, [...] deduce a value for U using the rules of template
     //  argument deduction.
     DeduceAutoResult DAR = DeduceAutoType(OrigResultType, RetExpr, Deduced);
@@ -3033,19 +3112,28 @@ bool Sema::DeduceFunctionTypeFromReturnExpr(FunctionDecl *FD,
   //  has multiple return statements, the return type is deduced for each return
   //  statement. [...] if the type deduced is not the same in each deduction,
   //  the program is ill-formed.
-  if (AT->isDeduced() && !FD->isInvalidDecl()) {
+  QualType DeducedT = AT->getDeducedType();
+  if (!DeducedT.isNull() && !FD->isInvalidDecl()) {
     AutoType *NewAT = Deduced->getContainedAutoType();
-    if (!FD->isDependentContext() &&
-        !Context.hasSameType(AT->getDeducedType(), NewAT->getDeducedType())) {
+    // It is possible that NewAT->getDeducedType() is null. When that happens,
+    // we should not crash, instead we ignore this deduction.
+    if (NewAT->getDeducedType().isNull())
+      return false;
+
+    CanQualType OldDeducedType = Context.getCanonicalFunctionResultType(
+                                   DeducedT);
+    CanQualType NewDeducedType = Context.getCanonicalFunctionResultType(
+                                   NewAT->getDeducedType());
+    if (!FD->isDependentContext() && OldDeducedType != NewDeducedType) {
       const LambdaScopeInfo *LambdaSI = getCurLambda();
       if (LambdaSI && LambdaSI->HasImplicitReturnType) {
         Diag(ReturnLoc, diag::err_typecheck_missing_return_type_incompatible)
-          << NewAT->getDeducedType() << AT->getDeducedType()
+          << NewAT->getDeducedType() << DeducedT
           << true /*IsLambda*/;
       } else {
         Diag(ReturnLoc, diag::err_auto_fn_different_deductions)
           << (AT->isDecltypeAuto() ? 1 : 0)
-          << NewAT->getDeducedType() << AT->getDeducedType();
+          << NewAT->getDeducedType() << DeducedT;
       }
       return true;
     }
@@ -3179,7 +3267,7 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
         }
         // return (some void expression); is legal in C++.
         else if (D != diag::ext_return_has_void_expr ||
-            !getLangOpts().CPlusPlus) {
+                 !getLangOpts().CPlusPlus) {
           NamedDecl *CurDecl = getCurFunctionOrMethodDecl();
 
           int FunctionKind = 0;
@@ -3286,6 +3374,9 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
   // return statement in our scope for later processing.
   if (Result->getNRVOCandidate())
     FunctionScopes.back()->Returns.push_back(Result);
+
+  if (FunctionScopes.back()->FirstReturnLoc.isInvalid())
+    FunctionScopes.back()->FirstReturnLoc = ReturnLoc;
 
   return Result;
 }
@@ -3486,11 +3577,6 @@ template <> struct DenseMapInfo<CatchHandlerType> {
     return LHS == RHS;
   }
 };
-
-// It's OK to treat CatchHandlerType as a POD type.
-template <> struct isPodLike<CatchHandlerType> {
-  static const bool value = true;
-};
 }
 
 namespace {
@@ -3515,7 +3601,7 @@ public:
   bool operator()(const CXXBaseSpecifier *S, CXXBasePath &) {
     if (S->getAccessSpecifier() == AccessSpecifier::AS_public) {
       CatchHandlerType Check(S->getType(), CheckAgainstPointer);
-      auto M = TypesToCheck;
+      const auto &M = TypesToCheck;
       auto I = M.find(Check);
       if (I != M.end()) {
         FoundHandler = I->second;
@@ -3763,11 +3849,10 @@ static void buildCapturedStmtCaptureList(
       continue;
     }
 
-    assert(Cap->isReferenceCapture() &&
-           "non-reference capture not yet implemented");
-
     Captures.push_back(CapturedStmt::Capture(Cap->getLocation(),
-                                             CapturedStmt::VCK_ByRef,
+                                             Cap->isReferenceCapture()
+                                                 ? CapturedStmt::VCK_ByRef
+                                                 : CapturedStmt::VCK_ByCopy,
                                              Cap->getVariable()));
     CaptureInits.push_back(Cap->getInitExpr());
   }
@@ -3878,9 +3963,9 @@ StmtResult Sema::ActOnCapturedRegionEnd(Stmt *S) {
   CapturedDecl *CD = RSI->TheCapturedDecl;
   RecordDecl *RD = RSI->TheRecordDecl;
 
-  CapturedStmt *Res = CapturedStmt::Create(getASTContext(), S,
-                                           RSI->CapRegionKind, Captures,
-                                           CaptureInits, CD, RD);
+  CapturedStmt *Res = CapturedStmt::Create(
+      getASTContext(), S, static_cast<CapturedRegionKind>(RSI->CapRegionKind),
+      Captures, CaptureInits, CD, RD);
 
   CD->setBody(Res->getCapturedStmt());
   RD->completeDefinition();

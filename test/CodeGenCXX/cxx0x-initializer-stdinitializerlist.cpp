@@ -249,7 +249,7 @@ haslist2::haslist2()
 void fn10(int i) {
   // CHECK-LABEL: define void @_Z4fn10i
   // CHECK: alloca [3 x i32]
-  // CHECK: call noalias i8* @_Znw{{[jm]}}
+  // CHECK: call i8* @_Znw{{[jm]}}
   // CHECK: store i32 %
   // CHECK: store i32 2
   // CHECK: store i32 3
@@ -502,7 +502,7 @@ namespace B19773010 {
   }
   void f2() {
     // CHECK-LABEL: @_ZN9B197730102f2Ev
-    // CHECK: store %"struct.B19773010::pair"* getelementptr inbounds ([1 x %"struct.B19773010::pair"], [1 x %"struct.B19773010::pair"]* bitcast ([1 x { i8*, i32 }]* @_ZGRZN9B197730102f2EvE1p_ to [1 x %"struct.B19773010::pair"]*), i64 0, i64 0), %"struct.B19773010::pair"** getelementptr inbounds ([2 x %"class.std::initializer_list.10"], [2 x %"class.std::initializer_list.10"]* @_ZZN9B197730102f2EvE1p, i64 0, i64 1, i32 0), align 8
+    // CHECK: store %"struct.B19773010::pair"* getelementptr inbounds ([1 x %"struct.B19773010::pair"], [1 x %"struct.B19773010::pair"]* bitcast ([1 x { i8*, i32 }]* @_ZGRZN9B197730102f2EvE1p_ to [1 x %"struct.B19773010::pair"]*), i64 0, i64 0), %"struct.B19773010::pair"** getelementptr inbounds ([2 x %"class.std::initializer_list.10"], [2 x %"class.std::initializer_list.10"]* @_ZZN9B197730102f2EvE1p, i64 0, i64 1, i32 0), align 16
     static std::initializer_list<pair<const char *, E>> a, p[2] =
         {a, {{"", ENUM_CONSTANT}}};
   }

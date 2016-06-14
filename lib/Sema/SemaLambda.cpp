@@ -226,15 +226,16 @@ getGenericLambdaTemplateParameterList(LambdaScopeInfo *LSI, Sema &SemaRef) {
   if (LSI->GLTemplateParameterList)
     return LSI->GLTemplateParameterList;
 
-  if (LSI->AutoTemplateParams.size()) {
+  if (!LSI->AutoTemplateParams.empty()) {
     SourceRange IntroRange = LSI->IntroducerRange;
     SourceLocation LAngleLoc = IntroRange.getBegin();
     SourceLocation RAngleLoc = IntroRange.getEnd();
     LSI->GLTemplateParameterList = TemplateParameterList::Create(
         SemaRef.Context,
         /*Template kw loc*/ SourceLocation(), LAngleLoc,
-        (NamedDecl **)LSI->AutoTemplateParams.data(),
-        LSI->AutoTemplateParams.size(), RAngleLoc);
+        llvm::makeArrayRef((NamedDecl *const *)LSI->AutoTemplateParams.data(),
+                           LSI->AutoTemplateParams.size()),
+        RAngleLoc);
   }
   return LSI->GLTemplateParameterList;
 }
@@ -354,7 +355,8 @@ CXXMethodDecl *Sema::startLambdaDefinition(CXXRecordDecl *Class,
                                            SourceRange IntroducerRange,
                                            TypeSourceInfo *MethodTypeInfo,
                                            SourceLocation EndLoc,
-                                           ArrayRef<ParmVarDecl *> Params) {
+                                           ArrayRef<ParmVarDecl *> Params,
+                                           const bool IsConstexprSpecified) {
   QualType MethodType = MethodTypeInfo->getType();
   TemplateParameterList *TemplateParams = 
             getGenericLambdaTemplateParameterList(getCurLambda(), *this);
@@ -391,7 +393,7 @@ CXXMethodDecl *Sema::startLambdaDefinition(CXXRecordDecl *Class,
                             MethodType, MethodTypeInfo,
                             SC_None,
                             /*isInline=*/true,
-                            /*isConstExpr=*/false,
+                            IsConstexprSpecified,
                             EndLoc);
   Method->setAccess(AS_public);
   
@@ -616,6 +618,8 @@ void Sema::deduceClosureReturnType(CapturingScopeInfo &CSI) {
   assert(CSI.HasImplicitReturnType);
   // If it was ever a placeholder, it had to been deduced to DependentTy.
   assert(CSI.ReturnType.isNull() || !CSI.ReturnType->isUndeducedType()); 
+  assert((!isa<LambdaScopeInfo>(CSI) || !getLangOpts().CPlusPlus14) &&
+         "lambda expressions use auto deduction in C++14 onwards");
 
   // C++ core issue 975:
   //   If a lambda-expression does not include a trailing-return-type,
@@ -685,7 +689,8 @@ void Sema::deduceClosureReturnType(CapturingScopeInfo &CSI) {
 
     QualType ReturnType =
         (RetE ? RetE->getType() : Context.VoidTy).getUnqualifiedType();
-    if (Context.hasSameType(ReturnType, CSI.ReturnType))
+    if (Context.getCanonicalFunctionResultType(ReturnType) ==
+          Context.getCanonicalFunctionResultType(CSI.ReturnType))
       continue;
 
     // FIXME: This is a poor diagnostic for ReturnStmts without expressions.
@@ -698,18 +703,11 @@ void Sema::deduceClosureReturnType(CapturingScopeInfo &CSI) {
   }
 }
 
-QualType Sema::performLambdaInitCaptureInitialization(SourceLocation Loc,
-                                                      bool ByRef,
-                                                      IdentifierInfo *Id,
-                                                      Expr *&Init) {
-
-  // We do not need to distinguish between direct-list-initialization
-  // and copy-list-initialization here, because we will always deduce
-  // std::initializer_list<T>, and direct- and copy-list-initialization
-  // always behave the same for such a type.
-  // FIXME: We should model whether an '=' was present.
-  const bool IsDirectInit = isa<ParenListExpr>(Init) || isa<InitListExpr>(Init);
-
+QualType Sema::buildLambdaInitCaptureInitialization(SourceLocation Loc,
+                                                    bool ByRef,
+                                                    IdentifierInfo *Id,
+                                                    bool IsDirectInit,
+                                                    Expr *&Init) {
   // Create an 'auto' or 'auto&' TypeSourceInfo that we can use to
   // deduce against.
   QualType DeductType = Context.getAutoDeductType();
@@ -722,49 +720,15 @@ QualType Sema::performLambdaInitCaptureInitialization(SourceLocation Loc,
   }
   TypeSourceInfo *TSI = TLB.getTypeSourceInfo(Context, DeductType);
 
-  // Are we a non-list direct initialization?
-  ParenListExpr *CXXDirectInit = dyn_cast<ParenListExpr>(Init);
-
-  Expr *DeduceInit = Init;
-  // Initializer could be a C++ direct-initializer. Deduction only works if it
-  // contains exactly one expression.
-  if (CXXDirectInit) {
-    if (CXXDirectInit->getNumExprs() == 0) {
-      Diag(CXXDirectInit->getLocStart(), diag::err_init_capture_no_expression)
-          << DeclarationName(Id) << TSI->getType() << Loc;
-      return QualType();
-    } else if (CXXDirectInit->getNumExprs() > 1) {
-      Diag(CXXDirectInit->getExpr(1)->getLocStart(),
-           diag::err_init_capture_multiple_expressions)
-          << DeclarationName(Id) << TSI->getType() << Loc;
-      return QualType();
-    } else {
-      DeduceInit = CXXDirectInit->getExpr(0);
-      if (isa<InitListExpr>(DeduceInit))
-        Diag(CXXDirectInit->getLocStart(), diag::err_init_capture_paren_braces)
-          << DeclarationName(Id) << Loc;
-    }
-  }
-
-  // Now deduce against the initialization expression and store the deduced
-  // type below.
-  QualType DeducedType;
-  if (DeduceAutoType(TSI, DeduceInit, DeducedType) == DAR_Failed) {
-    if (isa<InitListExpr>(Init))
-      Diag(Loc, diag::err_init_capture_deduction_failure_from_init_list)
-          << DeclarationName(Id)
-          << (DeduceInit->getType().isNull() ? TSI->getType()
-                                             : DeduceInit->getType())
-          << DeduceInit->getSourceRange();
-    else
-      Diag(Loc, diag::err_init_capture_deduction_failure)
-          << DeclarationName(Id) << TSI->getType()
-          << (DeduceInit->getType().isNull() ? TSI->getType()
-                                             : DeduceInit->getType())
-          << DeduceInit->getSourceRange();
-  }
+  // Deduce the type of the init capture.
+  QualType DeducedType = deduceVarTypeFromInitializer(
+      /*VarDecl*/nullptr, DeclarationName(Id), DeductType, TSI,
+      SourceRange(Loc, Loc), IsDirectInit, Init);
   if (DeducedType.isNull())
     return QualType();
+
+  // Are we a non-list direct initialization?
+  ParenListExpr *CXXDirectInit = dyn_cast<ParenListExpr>(Init);
 
   // Perform initialization analysis and ensure any implicit conversions
   // (such as lvalue-to-rvalue) are enforced.
@@ -802,9 +766,10 @@ QualType Sema::performLambdaInitCaptureInitialization(SourceLocation Loc,
   return DeducedType;
 }
 
-VarDecl *Sema::createLambdaInitCaptureVarDecl(SourceLocation Loc, 
-    QualType InitCaptureType, IdentifierInfo *Id, Expr *Init) {
-
+VarDecl *Sema::createLambdaInitCaptureVarDecl(SourceLocation Loc,
+                                              QualType InitCaptureType,
+                                              IdentifierInfo *Id,
+                                              unsigned InitStyle, Expr *Init) {
   TypeSourceInfo *TSI = Context.getTrivialTypeSourceInfo(InitCaptureType,
       Loc);
   // Create a dummy variable representing the init-capture. This is not actually
@@ -815,6 +780,8 @@ VarDecl *Sema::createLambdaInitCaptureVarDecl(SourceLocation Loc,
                                    Loc, Id, InitCaptureType, TSI, SC_Auto);
   NewVD->setInitCapture(true);
   NewVD->setReferenced(true);
+  // FIXME: Pass in a VarDecl::InitializationStyle.
+  NewVD->setInitStyle(static_cast<VarDecl::InitializationStyle>(InitStyle));
   NewVD->markUsed(Context);
   NewVD->setInit(Init);
   return NewVD;
@@ -843,19 +810,13 @@ void Sema::ActOnStartOfLambdaDefinition(LambdaIntroducer &Intro,
   bool KnownDependent = false;
   LambdaScopeInfo *const LSI = getCurLambda();
   assert(LSI && "LambdaScopeInfo should be on stack!");
-  TemplateParameterList *TemplateParams = 
-            getGenericLambdaTemplateParameterList(LSI, *this);
 
-  if (Scope *TmplScope = CurScope->getTemplateParamParent()) {
-    // Since we have our own TemplateParams, so check if an outer scope
-    // has template params, only then are we in a dependent scope.
-    if (TemplateParams)  {
-      TmplScope = TmplScope->getParent();
-      TmplScope = TmplScope ? TmplScope->getTemplateParamParent() : nullptr;
-    }
-    if (TmplScope && !TmplScope->decl_empty())
-      KnownDependent = true;
-  }
+  // The lambda-expression's closure type might be dependent even if its
+  // semantic context isn't, if it appears within a default argument of a
+  // function template.
+  if (CurScope->getTemplateParamParent())
+    KnownDependent = true;
+
   // Determine the signature of the call operator.
   TypeSourceInfo *MethodTyInfo;
   bool ExplicitParams = true;
@@ -918,8 +879,9 @@ void Sema::ActOnStartOfLambdaDefinition(LambdaIntroducer &Intro,
   CXXRecordDecl *Class = createLambdaClosureType(Intro.Range, MethodTyInfo,
                                                  KnownDependent, Intro.Default);
 
-  CXXMethodDecl *Method = startLambdaDefinition(Class, Intro.Range,
-                                                MethodTyInfo, EndLoc, Params);
+  CXXMethodDecl *Method =
+      startLambdaDefinition(Class, Intro.Range, MethodTyInfo, EndLoc, Params,
+                            ParamInfo.getDeclSpec().isConstexprSpecified());
   if (ExplicitParams)
     CheckCXXDefaultArguments(Method);
   
@@ -958,7 +920,12 @@ void Sema::ActOnStartOfLambdaDefinition(LambdaIntroducer &Intro,
     = Intro.Default == LCD_None? Intro.Range.getBegin() : Intro.DefaultLoc;
   for (auto C = Intro.Captures.begin(), E = Intro.Captures.end(); C != E;
        PrevCaptureLoc = C->Loc, ++C) {
-    if (C->Kind == LCK_This) {
+    if (C->Kind == LCK_This || C->Kind == LCK_StarThis) {
+      if (C->Kind == LCK_StarThis) 
+        Diag(C->Loc, !getLangOpts().CPlusPlus1z
+                             ? diag::ext_star_this_lambda_capture_cxx1z
+                             : diag::warn_cxx14_compat_star_this_lambda_capture);
+
       // C++11 [expr.prim.lambda]p8:
       //   An identifier or this shall not appear more than once in a 
       //   lambda-capture.
@@ -970,10 +937,12 @@ void Sema::ActOnStartOfLambdaDefinition(LambdaIntroducer &Intro,
         continue;
       }
 
-      // C++11 [expr.prim.lambda]p8:
-      //   If a lambda-capture includes a capture-default that is =, the 
-      //   lambda-capture shall not contain this [...].
-      if (Intro.Default == LCD_ByCopy) {
+      // C++1z [expr.prim.lambda]p8:
+      //  If a lambda-capture includes a capture-default that is =, each
+      //  simple-capture of that lambda-capture shall be of the form "&
+      //  identifier" or "* this". [ Note: The form [&,this] is redundant but
+      //  accepted for compatibility with ISO C++14. --end note ]
+      if (Intro.Default == LCD_ByCopy && C->Kind != LCK_StarThis) {
         Diag(C->Loc, diag::err_this_capture_with_copy_default)
             << FixItHint::CreateRemoval(
                 SourceRange(getLocForEndOfToken(PrevCaptureLoc), C->Loc));
@@ -989,7 +958,9 @@ void Sema::ActOnStartOfLambdaDefinition(LambdaIntroducer &Intro,
         continue;
       }
       
-      CheckCXXThisCapture(C->Loc, /*Explicit=*/true);
+      CheckCXXThisCapture(C->Loc, /*Explicit=*/true, /*BuildAndDiagnose*/ true,
+                          /*FunctionScopeIndexToStopAtPtr*/ nullptr,
+                          C->Kind == LCK_StarThis);
       continue;
     }
 
@@ -1013,8 +984,23 @@ void Sema::ActOnStartOfLambdaDefinition(LambdaIntroducer &Intro,
       // in this case.
       if (C->InitCaptureType.get().isNull()) 
         continue;
-      Var = createLambdaInitCaptureVarDecl(C->Loc, C->InitCaptureType.get(), 
-            C->Id, C->Init.get());
+
+      unsigned InitStyle;
+      switch (C->InitKind) {
+      case LambdaCaptureInitKind::NoInit:
+        llvm_unreachable("not an init-capture?");
+      case LambdaCaptureInitKind::CopyInit:
+        InitStyle = VarDecl::CInit;
+        break;
+      case LambdaCaptureInitKind::DirectInit:
+        InitStyle = VarDecl::CallInit;
+        break;
+      case LambdaCaptureInitKind::ListInit:
+        InitStyle = VarDecl::ListInit;
+        break;
+      }
+      Var = createLambdaInitCaptureVarDecl(C->Loc, C->InitCaptureType.get(),
+                                           C->Id, InitStyle, C->Init.get());
       // C++1y [expr.prim.lambda]p11:
       //   An init-capture behaves as if it declares and explicitly
       //   captures a variable [...] whose declarative region is the
@@ -1022,6 +1008,9 @@ void Sema::ActOnStartOfLambdaDefinition(LambdaIntroducer &Intro,
       if (Var)
         PushOnScopeChains(Var, CurScope, false);
     } else {
+      assert(C->InitKind == LambdaCaptureInitKind::NoInit &&
+             "init capture has valid but null init?");
+
       // C++11 [expr.prim.lambda]p8:
       //   If a lambda-capture includes a capture-default that is &, the 
       //   identifiers in the lambda-capture shall not be preceded by &.
@@ -1160,6 +1149,12 @@ static void addFunctionPointerConversion(Sema &S,
                                          SourceRange IntroducerRange,
                                          CXXRecordDecl *Class,
                                          CXXMethodDecl *CallOperator) {
+  // This conversion is explicitly disabled if the lambda's function has
+  // pass_object_size attributes on any of its parameters.
+  if (std::any_of(CallOperator->param_begin(), CallOperator->param_end(),
+                  std::mem_fn(&ParmVarDecl::hasAttr<PassObjectSizeAttr>)))
+    return;
+
   // Add the conversion to function pointer.
   const FunctionProtoType *CallOpProto = 
       CallOperator->getType()->getAs<FunctionProtoType>();
@@ -1539,10 +1534,9 @@ ExprResult Sema::BuildLambdaExpr(SourceLocation StartLoc, SourceLocation EndLoc,
       // Handle 'this' capture.
       if (From.isThisCapture()) {
         Captures.push_back(
-            LambdaCapture(From.getLocation(), IsImplicit, LCK_This));
-        CaptureInits.push_back(new (Context) CXXThisExpr(From.getLocation(),
-                                                         getCurrentThisType(),
-                                                         /*isImplicit=*/true));
+            LambdaCapture(From.getLocation(), IsImplicit,
+                          From.isCopyCapture() ? LCK_StarThis : LCK_This));
+        CaptureInits.push_back(From.getInitExpr());
         ArrayIndexStarts.push_back(ArrayIndexVars.size());
         continue;
       }
@@ -1607,6 +1601,17 @@ ExprResult Sema::BuildLambdaExpr(SourceLocation StartLoc, SourceLocation EndLoc,
                                           CaptureInits, ArrayIndexVars, 
                                           ArrayIndexStarts, EndLoc,
                                           ContainsUnexpandedParameterPack);
+  // If the lambda expression's call operator is not explicitly marked constexpr
+  // and we are not in a dependent context, analyze the call operator to infer
+  // its constexpr-ness, supressing diagnostics while doing so.
+  if (getLangOpts().CPlusPlus1z && !CallOperator->isInvalidDecl() &&
+      !CallOperator->isConstexpr() &&
+      !Class->getDeclContext()->isDependentContext()) {
+    TentativeAnalysisScope DiagnosticScopeGuard(*this);
+    CallOperator->setConstexpr(
+        CheckConstexprFunctionDecl(CallOperator) &&
+        CheckConstexprFunctionBody(CallOperator, CallOperator->getBody()));
+  }
 
   if (!CurContext->isDependentContext()) {
     switch (ExprEvalContexts.back().Context) {
@@ -1700,8 +1705,7 @@ ExprResult Sema::BuildBlockForLambdaConversion(SourceLocation CurrentLocation,
                                     SC_None);
   BlockDecl::Capture Capture(/*Variable=*/CapVar, /*ByRef=*/false,
                              /*Nested=*/false, /*Copy=*/Init.get());
-  Block->setCaptures(Context, &Capture, &Capture + 1, 
-                     /*CapturesCXXThis=*/false);
+  Block->setCaptures(Context, Capture, /*CapturesCXXThis=*/false);
 
   // Add a fake function body to the block. IR generation is responsible
   // for filling in the actual body, which cannot be expressed as an AST.
