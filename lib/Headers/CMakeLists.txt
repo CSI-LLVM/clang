@@ -6,15 +6,25 @@ set(files
   avx2intrin.h
   avx512bwintrin.h
   avx512cdintrin.h
+  avx512dqintrin.h
   avx512erintrin.h
   avx512fintrin.h
+  avx512ifmaintrin.h
+  avx512ifmavlintrin.h
+  avx512pfintrin.h
+  avx512vbmiintrin.h
+  avx512vbmivlintrin.h
   avx512vlbwintrin.h
-  avx512vlintrin.h
-  avx512dqintrin.h
+  avx512vlcdintrin.h
   avx512vldqintrin.h
+  avx512vlintrin.h
   avxintrin.h
   bmi2intrin.h
   bmiintrin.h
+  __clang_cuda_cmath.h
+  __clang_cuda_intrinsics.h
+  __clang_cuda_math_forward_declares.h
+  __clang_cuda_runtime_wrapper.h
   cpuid.h
   cuda_builtin_vars.h
   emmintrin.h
@@ -36,7 +46,10 @@ set(files
   mmintrin.h
   mm_malloc.h
   module.modulemap
+  mwaitxintrin.h
   nmmintrin.h
+  opencl-c.h
+  pkuintrin.h
   pmmintrin.h
   popcntintrin.h
   prfchwintrin.h
@@ -59,12 +72,17 @@ set(files
   unwind.h
   vadefs.h
   varargs.h
-  __wmmintrin_aes.h
+  vecintrin.h
   wmmintrin.h
+  __wmmintrin_aes.h
   __wmmintrin_pclmul.h
   x86intrin.h
   xmmintrin.h
   xopintrin.h
+  xsavecintrin.h
+  xsaveintrin.h
+  xsaveoptintrin.h
+  xsavesintrin.h
   xtestintrin.h
   )
 
@@ -96,5 +114,14 @@ set_target_properties(clang-headers PROPERTIES FOLDER "Misc")
 
 install(
   FILES ${files} ${CMAKE_CURRENT_BINARY_DIR}/arm_neon.h
+  COMPONENT clang-headers
   PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
   DESTINATION lib${LLVM_LIBDIR_SUFFIX}/clang/${CLANG_VERSION}/include)
+
+if (NOT CMAKE_CONFIGURATION_TYPES) # don't add this for IDE's.
+  add_custom_target(install-clang-headers
+    DEPENDS clang-headers
+    COMMAND "${CMAKE_COMMAND}"
+            -DCMAKE_INSTALL_COMPONENT=clang-headers
+            -P "${CMAKE_BINARY_DIR}/cmake_install.cmake")
+endif()

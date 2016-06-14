@@ -26,10 +26,16 @@ endif ()
 
 list(APPEND CLANG_TEST_DEPS
   clang clang-headers
-  clang-check clang-format
+  clang-format
   c-index-test diagtool
   clang-tblgen
   )
+  
+if(CLANG_ENABLE_STATIC_ANALYZER)
+  list(APPEND CLANG_TEST_DEPS
+    clang-check
+    )
+endif()
 
 if (CLANG_ENABLE_ARCMT)
   list(APPEND CLANG_TEST_DEPS
@@ -40,6 +46,7 @@ endif ()
 
 if (ENABLE_CLANG_EXAMPLES)
   list(APPEND CLANG_TEST_DEPS
+    AnnotateFunctions
     clang-interpreter
     PrintFunctionNames
     )
@@ -58,9 +65,23 @@ set(CLANG_TEST_PARAMS
 if( NOT CLANG_BUILT_STANDALONE )
   list(APPEND CLANG_TEST_DEPS
     llvm-config
-    llc opt FileCheck count not llvm-symbolizer llvm-profdata llvm-objdump
+    FileCheck count not
+    llc
+    llvm-bcanalyzer
+    llvm-objdump
+    llvm-profdata
+    llvm-readobj
+    llvm-symbolizer
+    opt
     )
+
+  if(TARGET llvm-lto)
+    list(APPEND CLANG_TEST_DEPS llvm-lto)
+  endif()
 endif()
+
+add_custom_target(clang-test-depends DEPENDS ${CLANG_TEST_DEPS})
+set_target_properties(clang-test-depends PROPERTIES FOLDER "Clang tests")
 
 add_lit_testsuite(check-clang "Running the Clang regression tests"
   ${CMAKE_CURRENT_BINARY_DIR}

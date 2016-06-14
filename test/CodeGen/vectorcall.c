@@ -9,9 +9,9 @@ void __vectorcall v2(char a, char b) {}
 // CHECK: define x86_vectorcallcc void @"\01v2@@8"(i8 inreg signext %a, i8 inreg signext %b)
 // X64: define x86_vectorcallcc void @"\01v2@@16"(i8 %a, i8 %b)
 
-struct Small { int a; };
+struct Small { int x; };
 void __vectorcall v3(int a, struct Small b, int c) {}
-// CHECK: define x86_vectorcallcc void @"\01v3@@12"(i32 inreg %a, %struct.Small* byval align 4 %b, i32 inreg %c)
+// CHECK: define x86_vectorcallcc void @"\01v3@@12"(i32 inreg %a, i32 %b.0, i32 inreg %c)
 // X64: define x86_vectorcallcc void @"\01v3@@24"(i32 %a, i32 %b.coerce, i32 %c)
 
 struct Large { int a[5]; };
@@ -32,13 +32,13 @@ void __vectorcall hfa1(int a, struct HFA4 b, int c) {}
 // registers.
 void __vectorcall hfa2(struct HFA4 a, struct HFA4 b, double c) {}
 // CHECK: define x86_vectorcallcc void @"\01hfa2@@72"(double %a.0, double %a.1, double %a.2, double %a.3, %struct.HFA4* inreg %b, double %c)
-// X64: define x86_vectorcallcc void @"\01hfa2@@72"(double %a.0, double %a.1, double %a.2, double %a.3, %struct.HFA4* align 8 %b, double %c)
+// X64: define x86_vectorcallcc void @"\01hfa2@@72"(double %a.0, double %a.1, double %a.2, double %a.3, %struct.HFA4* %b, double %c)
 
 // Ensure that we pass builtin types directly while counting them against the
 // SSE register usage.
 void __vectorcall hfa3(double a, double b, double c, double d, double e, struct HFA2 f) {}
 // CHECK: define x86_vectorcallcc void @"\01hfa3@@56"(double %a, double %b, double %c, double %d, double %e, %struct.HFA2* inreg %f)
-// X64: define x86_vectorcallcc void @"\01hfa3@@56"(double %a, double %b, double %c, double %d, double %e, %struct.HFA2* align 8 %f)
+// X64: define x86_vectorcallcc void @"\01hfa3@@56"(double %a, double %b, double %c, double %d, double %e, %struct.HFA2* %f)
 
 // Aggregates with more than four elements are not HFAs and are passed byval.
 // Because they are not classified as homogeneous, they don't get special
@@ -63,11 +63,11 @@ void __vectorcall hva1(int a, struct HVA4 b, int c) {}
 
 void __vectorcall hva2(struct HVA4 a, struct HVA4 b, v4f32 c) {}
 // CHECK: define x86_vectorcallcc void @"\01hva2@@144"(<4 x float> %a.0, <4 x float> %a.1, <4 x float> %a.2, <4 x float> %a.3, %struct.HVA4* inreg %b, <4 x float> %c)
-// X64: define x86_vectorcallcc void @"\01hva2@@144"(<4 x float> %a.0, <4 x float> %a.1, <4 x float> %a.2, <4 x float> %a.3, %struct.HVA4* align 16 %b, <4 x float> %c)
+// X64: define x86_vectorcallcc void @"\01hva2@@144"(<4 x float> %a.0, <4 x float> %a.1, <4 x float> %a.2, <4 x float> %a.3, %struct.HVA4* %b, <4 x float> %c)
 
 void __vectorcall hva3(v4f32 a, v4f32 b, v4f32 c, v4f32 d, v4f32 e, struct HVA2 f) {}
 // CHECK: define x86_vectorcallcc void @"\01hva3@@112"(<4 x float> %a, <4 x float> %b, <4 x float> %c, <4 x float> %d, <4 x float> %e, %struct.HVA2* inreg %f)
-// X64: define x86_vectorcallcc void @"\01hva3@@112"(<4 x float> %a, <4 x float> %b, <4 x float> %c, <4 x float> %d, <4 x float> %e, %struct.HVA2* align 16 %f)
+// X64: define x86_vectorcallcc void @"\01hva3@@112"(<4 x float> %a, <4 x float> %b, <4 x float> %c, <4 x float> %d, <4 x float> %e, %struct.HVA2* %f)
 
 typedef float __attribute__((ext_vector_type(3))) v3f32;
 struct OddSizeHVA { v3f32 x, y; };

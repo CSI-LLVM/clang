@@ -195,6 +195,7 @@ public:
   bool VisitChildren(CXCursor Parent);
 
   // Declaration visitors
+  bool VisitTypeAliasTemplateDecl(TypeAliasTemplateDecl *D);
   bool VisitTypeAliasDecl(TypeAliasDecl *D);
   bool VisitAttributes(Decl *D);
   bool VisitBlockDecl(BlockDecl *B);
@@ -237,6 +238,7 @@ public:
   bool VisitUsingDecl(UsingDecl *D);
   bool VisitUnresolvedUsingValueDecl(UnresolvedUsingValueDecl *D);
   bool VisitUnresolvedUsingTypenameDecl(UnresolvedUsingTypenameDecl *D);
+  bool VisitStaticAssertDecl(StaticAssertDecl *D);
   
   // Name visitor
   bool VisitDeclarationNameInfo(DeclarationNameInfo Name);

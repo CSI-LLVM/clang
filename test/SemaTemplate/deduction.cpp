@@ -107,7 +107,7 @@ namespace PR7463 {
 }
 
 namespace test0 {
-  template <class T> void make(const T *(*fn)()); // expected-note {{candidate template ignored: can't deduce a type for 'T' that would make 'const T' equal 'char'}}
+  template <class T> void make(const T *(*fn)()); // expected-note {{candidate template ignored: cannot deduce a type for 'T' that would make 'const T' equal 'char'}}
   char *char_maker();
   void test() {
     make(char_maker); // expected-error {{no matching function for call to 'make'}}
@@ -206,4 +206,62 @@ namespace PR19372 {
 namespace PR18645 {
   template<typename F> F Quux(F &&f);
   auto Baz = Quux(Quux<float>);
+}
+
+namespace NonDeducedNestedNameSpecifier {
+  template<typename T> struct A {
+    template<typename U> struct B {
+      B(int) {}
+    };
+  };
+
+  template<typename T> int f(A<T>, typename A<T>::template B<T>);
+  int k = f(A<int>(), 0);
+}
+
+namespace PR27601_RecursivelyInheritedBaseSpecializationsDeductionAmbiguity {
+namespace ns1 {
+
+template<class...> struct B { };
+template<class H, class ... Ts> struct B<H, Ts...> : B<> { };
+template<class ... Ts> struct D : B<Ts...> { };
+
+template<class T, class ... Ts> void f(B<T, Ts...> &) { }
+
+int main() {
+  D<int, char> d;
+  f<int>(d);
+}
+} //end ns1
+
+namespace ns2 {
+
+template <int i, typename... Es> struct tup_impl;
+
+template <int i> struct tup_impl<i> {}; // empty tail
+
+template <int i, typename Head, typename... Tail>
+struct tup_impl<i, Head, Tail...> : tup_impl<i + 1, Tail...> {
+  using value_type = Head;
+  Head head;
+};
+
+template <typename... Es> struct tup : tup_impl<0, Es...> {};
+
+template <typename Head, int i, typename... Tail>
+Head &get_helper(tup_impl<i, Head, Tail...> &t) {
+  return t.head;
+}
+
+template <typename Head, int i, typename... Tail>
+Head const &get_helper(tup_impl<i, Head, Tail...> const &t) {
+  return t.head;
+}
+
+int main() {
+  tup<int, double, char> t;
+  get_helper<double>(t);
+  return 0;
+}
+} // end ns2 
 }

@@ -833,7 +833,7 @@ Parser::TPResult Parser::TryParseDeclarator(bool mayBeAbstract,
       // '(' abstract-declarator ')'
       if (Tok.isOneOf(tok::kw___attribute, tok::kw___declspec, tok::kw___cdecl,
                       tok::kw___stdcall, tok::kw___fastcall, tok::kw___thiscall,
-                      tok::kw___vectorcall, tok::kw___unaligned))
+                      tok::kw___vectorcall))
         return TPResult::True; // attributes indicate declaration
       TPResult TPR = TryParseDeclarator(mayBeAbstract, mayHaveIdentifier);
       if (TPR != TPResult::Ambiguous)
@@ -946,6 +946,7 @@ Parser::isExpressionOrTypeSpecifierSimple(tok::TokenKind Kind) {
   case tok::kw_char:
   case tok::kw_const:
   case tok::kw_double:
+  case tok::kw___float128:
   case tok::kw_enum:
   case tok::kw_half:
   case tok::kw_float:
@@ -987,6 +988,8 @@ Parser::isExpressionOrTypeSpecifierSimple(tok::TokenKind Kind) {
   case tok::kw___pixel:
   case tok::kw___bool:
   case tok::kw__Atomic:
+#define GENERIC_IMAGE_TYPE(ImgType, Id) case tok::kw_##ImgType##_t:
+#include "clang/Basic/OpenCLImageTypes.def"
   case tok::kw___unknown_anytype:
     return TPResult::False;
 
@@ -1089,6 +1092,7 @@ public:
 /// [GNU]     typeof-specifier
 /// [GNU]     '_Complex'
 /// [C++11]   'auto'
+/// [GNU]     '__auto_type'
 /// [C++11]   'decltype' ( expression )
 /// [C++1y]   'decltype' ( 'auto' )
 ///
@@ -1262,6 +1266,7 @@ Parser::isCXXDeclarationSpecifier(Parser::TPResult BracedCastResult,
   case tok::kw_restrict:
   case tok::kw__Complex:
   case tok::kw___attribute:
+  case tok::kw___auto_type:
     return TPResult::True;
 
     // Microsoft
@@ -1422,6 +1427,7 @@ Parser::isCXXDeclarationSpecifier(Parser::TPResult BracedCastResult,
   case tok::kw_half:
   case tok::kw_float:
   case tok::kw_double:
+  case tok::kw___float128:
   case tok::kw_void:
   case tok::annot_decltype:
     if (NextToken().is(tok::l_paren))
@@ -1513,8 +1519,10 @@ bool Parser::isCXXDeclarationSpecifierAType() {
   case tok::kw_half:
   case tok::kw_float:
   case tok::kw_double:
+  case tok::kw___float128:
   case tok::kw_void:
   case tok::kw___unknown_anytype:
+  case tok::kw___auto_type:
     return true;
 
   case tok::kw_auto:
