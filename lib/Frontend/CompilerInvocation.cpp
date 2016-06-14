@@ -1705,8 +1705,7 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
       getLastArgIntValue(Args, OPT_fsanitize_address_field_padding, 0, Diags);
   Opts.SanitizerBlacklistFiles = Args.getAllArgValues(OPT_fsanitize_blacklist);
 
-  // ANGE XXX: change the option name later; also possibly add more options
-  Opts.CodeSpectatorInterface = Args.hasArg(OPT_fcsi);
+  Opts.ComprehensiveStaticInstrumentation = Args.hasArg(OPT_fcsi);
 }
 
 static void ParsePreprocessorArgs(PreprocessorOptions &Opts, ArgList &Args,
@@ -1902,12 +1901,7 @@ bool CompilerInvocation::CreateFromArgs(CompilerInvocation &Res,
       Res.getLangOpts()->ObjCAutoRefCount = 1;
     parseSanitizerKinds("-fsanitize=", Args.getAllArgValues(OPT_fsanitize_EQ),
                         Diags, Res.getLangOpts()->Sanitize);
-
-    // ANGE XXX: change the option name later; also possibly add more options
-    // Added it here, because we want to add instrumentation even if the input
-    // is just LLVM IR, for testing purpose
-    Res.getLangOpts()->CodeSpectatorInterface = Args.hasArg(OPT_fcsi);
-
+    Res.getLangOpts()->ComprehensiveStaticInstrumentation = Args.hasArg(OPT_fcsi);
   } else {
     // Other LangOpts are only initialzed when the input is not AST or LLVM IR.
     ParseLangArgs(*Res.getLangOpts(), Args, DashX, Diags);

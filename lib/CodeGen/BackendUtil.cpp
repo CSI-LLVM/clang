@@ -244,11 +244,9 @@ static void addDataFlowSanitizerPass(const PassManagerBuilder &Builder,
   PM.add(createDataFlowSanitizerPass(LangOpts.SanitizerBlacklistFiles));
 }
 
-// ANGE XXX: Maybe make the option fancier later
-static void addCodeSpectatorInterfacePass(const PassManagerBuilder &Builder,
-                              PassManagerBase &PM) {
-  // possibly add other passes?
-  PM.add(createCodeSpectatorInterfacePass());
+static void addComprehensiveStaticInstrumentationPass(const PassManagerBuilder &Builder,
+                                                      PassManagerBase &PM) {
+  PM.add(createComprehensiveStaticInstrumentationPass());
 }
 
 static TargetLibraryInfoImpl *createTLII(llvm::Triple &TargetTriple,
@@ -373,12 +371,11 @@ void EmitAssemblyHelper::CreatePasses() {
                            addDataFlowSanitizerPass);
   }
 
-// ANGE XXX: Let's always add it for now
-  if (LangOpts.CodeSpectatorInterface) {
+  if (LangOpts.ComprehensiveStaticInstrumentation) {
     PMBuilder.addExtension(PassManagerBuilder::EP_OptimizerLast,
-                           addCodeSpectatorInterfacePass);
+                           addComprehensiveStaticInstrumentationPass);
     PMBuilder.addExtension(PassManagerBuilder::EP_EnabledOnOptLevel0,
-                           addCodeSpectatorInterfacePass);
+                           addComprehensiveStaticInstrumentationPass);
   }
 
   // Figure out TargetLibraryInfo.
