@@ -72,7 +72,7 @@ program-under-test.
 The LLVM/Clang used to build the tool does not have to be CSI:LLVM, as long
 as it generates LLVM bitcodes compatible with CSI:LLVM.
 
-Usage: Create a CSI instrumented program-under-text
+Usage: Create a CSI instrumented program-under-test
 ---------------------------------------------------
 
 To create a CSI instrumented program-under-test linked with a CSI tool 
@@ -149,8 +149,7 @@ CSI provides two initialization hooks, shown below:
   
   // Hooks to be defined by tool writer
   void __csi_init();
-  void __csi_unit_init(const char * const file_name, 
-                       const instrumentation_counts_t counts);
+  void __csi_unit_init(const char * const file_name, const instrumentation_counts_t counts);
 
 Instrumentation hook ``__csi_init`` is designed for performing any
 global initialization necessary for the tool; it is called once only
@@ -323,21 +322,20 @@ Limitations
 -----------
 
 * One limitation to LTO is that, it cannot fully optimize dynamic libraries,
-since dynamic libraries must be compiled as position independent code (PIC), and
-as the compiler cannot predict runtime addresses within the library, it must
-invoke tool-provided hooks as PIC function calls.  In these cases, LTO can
-sometimes fail to perform optimization to eliminate null hooks or dead code
-within the hooks.  To be conservative and avoid these penalties, libraries
-should be statically linked with the TIX.
+  since dynamic libraries must be compiled as position independent code (PIC), 
+  and as the compiler cannot predict runtime addresses within the library, 
+  it must invoke tool-provided hooks as PIC function calls.  In these cases, 
+  LTO can sometimes fail to perform optimization to eliminate null hooks or 
+  dead code within the hooks.  To be conservative and avoid these penalties, 
+  libraries should be statically linked with the TIX.
 
-* On systems where LTO is not used, the TIX produced by linking a program with a
-CSI tool will still function correctly, but might not be optimized.  Null hooks
-might not be elided, for example, meaning that linking an instrumented
-program-under-test with the null tool might produce a slower executable than if
-CSI instrumentation were not inserted.  
+* On systems where LTO is not used, the TIX produced by linking a program with 
+  a CSI tool will still function correctly, but might not be optimized.  Null 
+  hooks might not be elided, for example, meaning that linking an instrumented
+  program-under-test with the null tool might produce a slower executable than 
+  if CSI instrumentation were not inserted.  
 
-* CSI currently does not support instrumentation for exceptions and C++11
-atomics.
+* CSI currently does not support instrumentation for exceptions and C++11 atomics.
 
 
 Current Status
@@ -350,11 +348,5 @@ bug free.
 We are actively working on enhancing the CSI framework, including adding
 instrumentation for exceptions and atomics, supporting more properties to expose
 useful information from compiler analyses, and providing other kinds of static
-information such as how the program objects relate to each other in the form of
-relation tables.   
+information such as how the program objects relate to each other.   
 
-
-More Information
-----------------
-
-Do we want to include a link to the full API doc or the paper here?
