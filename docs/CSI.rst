@@ -262,8 +262,9 @@ CSI provides the following hooks for memory operations:
   void __csi_after_store(const csi_id_t store_id, const void *addr,
                          const int32_t num_bytes, const uint64_t prop);
 
-  // macros for property:
-  #define LOAD_IS_READ_BEFORE_WRITE_IN_BB   0x1
+  // Load property: the load is a read-before-write on the address in
+  // the same basic block.
+  #define CSI_PROP_LOAD_READ_BEFORE_WRITE_IN_BB 0x1
 
 The hooks ``__csi_before_load`` and ``__csi_after_load`` are called before and
 after memory loads, respectively, and likewise, ``__csi_before_store`` and
