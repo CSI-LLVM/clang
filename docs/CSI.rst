@@ -1,4 +1,4 @@
-Comprehensive Static Instrumentation 
+Comprehensive Static Instrumentation
 ====================================
 
 Introduction
@@ -12,7 +12,7 @@ code of a program-under-test, such as function entry and exit points,
 basic-block entry and exit point, before and after each memory
 operation, etc.  Tool writers can instrument a program-under-test
 simply by first writing a library that defines the relevant hooks and
-statically linking their compiled library with the program-under-test. 
+statically linking their compiled library with the program-under-test.
 
 How to build
 ------------
@@ -20,7 +20,7 @@ How to build
 The CSI framework is built for LLVM (extending LLVM 3.8 up to commit
 9c64d50), referred to as CSI:LLVM.  CSI:LLVM is open-source software
 released under the University of Illinois Open Source License, and the
-code is published on GitHub.  
+code is published on GitHub.
 
 To ensure high performance of CSI tools, CSI:LLVM ideally should be
 configured to enable link-time optimization (LTO), and the GNU ``gold
@@ -35,11 +35,11 @@ will output an error if it cannot be found.
 
 To build CSI, execute the following commands:
 
-.. code-block:: bash 
+.. code-block:: bash
 
-  % git clone --recursive git@github.com:csi-llvm/llvm.git 
+  % git clone --recursive git@github.com:csi-llvm/llvm.git
   % cd llvm/csi
-  (possibly edit build.sh to update path to gold linker and its plugin-api.h) 
+  (possibly edit build.sh to update path to gold linker and its plugin-api.h)
   % ./build.sh
 
 Supported Platforms
@@ -50,11 +50,11 @@ CSI is supported on Linux x86_64 (tested on UBuntu 14.04 x86_64).
 Usage: Create a CSI tool
 ------------------------
 
-To create a CSI tool, add ``#include <csi.h>`` at the top of the tool source 
+To create a CSI tool, add ``#include <csi.h>`` at the top of the tool source
 and implement function bodies for the hooks relevant to the tool.
 
-To build the tool object file suitable for linking with an instrumented 
-program-under-test (assuming the tool source file is named ``my_tool.cpp``), 
+To build the tool object file suitable for linking with an instrumented
+program-under-test (assuming the tool source file is named ``my_tool.cpp``),
 execute the following:
 
 .. code-block:: bash
@@ -64,8 +64,8 @@ execute the following:
   % llvm-link my_tool.o null_tool.o -o my_tool.o
 
 The ``null_tool.cpp`` is provided as part of the CSI distribution (under
-``llvm/projects/compiler-rt/test/csi/toolkit/null_tool.cpp``) which consists 
-of null hooks that simply return.  Linking ``my_tool`` with ``null_tool``  
+``llvm/projects/compiler-rt/test/csi/toolkit/null_tool.cpp``) which consists
+of null hooks that simply return.  Linking ``my_tool`` with ``null_tool``
 allows the LTO to later elide hooks irrelevant to the tool entirely from the
 program-under-test.
 
@@ -75,20 +75,20 @@ as it generates LLVM bitcodes compatible with CSI:LLVM.
 Usage: Create a CSI instrumented program-under-test
 ---------------------------------------------------
 
-To create a CSI instrumented program-under-test linked with a CSI tool 
-(henceforth referred to as the Tool-Instrumented-Executable, or TIX for short), 
+To create a CSI instrumented program-under-test linked with a CSI tool
+(henceforth referred to as the Tool-Instrumented-Executable, or TIX for short),
 one needs to do the following:
 
 * Modify paths in the build process to point to CSI:LLVM (including its Clang
-  driver). 
+  driver).
 * When building object files for the TIX, pass additional arguments ``-fcsi``
   and ``-emit-llvm`` to the Clang driver, which produces CSI instrumented
-  object files.   
+  object files.
 * During the linking stage for the TIX, add additional arguments
   ``-fuse-ld=gold`` and ``-flto`` and add the tool object file (e.g.
   ``my_tool.o``) to be statically linked to the TIX.
 
-For example, say we want to instrument a program that consists of two files 
+For example, say we want to instrument a program that consists of two files
 ``foo.cpp`` and ``bar.cpp`` and link the program with a CSI tool ``my_tool.o``
 (built as shown above), execute the following:
 
@@ -96,7 +96,7 @@ For example, say we want to instrument a program that consists of two files
 
   % clang++ -c -O3 -g -fcsi -emit-llvm foo.cpp -o foo.o
   % clang++ -c -O3 -g -fcsi -emit-llvm bar.cpp -o bar.o
-  % clang++ foo.o bar.o my_tool.o /usr/lib/clang/3.3/lib/linux/libclang_rt.csi-x86_64.a -fuse-ld=gold -flto -lrt -ldl -o foo 
+  % clang++ foo.o bar.o my_tool.o /usr/lib/clang/3.3/lib/linux/libclang_rt.csi-x86_64.a -fuse-ld=gold -flto -lrt -ldl -o foo
 
 Notice that in the final stage of linking, the tool user also needs to link
 in the static library of the CSI runtime to produce the final TIX.  We plan to
@@ -106,13 +106,13 @@ for the time being, the tool user should link it in explicitly.
 CSI API Overview
 ----------------
 
-CSI's instrumentation hooks are organized into four groups: initialization, 
-memory accesses, basic blocks, and functions.  To provide flexibility to the 
-tool writer, a hook exists both just before the event, and just after. 
+CSI's instrumentation hooks are organized into four groups: initialization,
+memory accesses, basic blocks, and functions.  To provide flexibility to the
+tool writer, a hook exists both just before the event, and just after.
 
-Except for the initialization hooks, every other hook names one or more 
-program objects, such as a basic block or a memory operation.  CSI gives 
-each such program object a unique integer identifier within one of 
+Except for the initialization hooks, every other hook names one or more
+program objects, such as a basic block or a memory operation.  CSI gives
+each such program object a unique integer identifier within one of
 (currently) six program-object categories:
 
 * functions,
@@ -141,20 +141,20 @@ CSI provides two initialization hooks, shown below:
 
 .. code-block:: c++
 
-  typedef int64_t csi_id_t; 
+  typedef int64_t csi_id_t;
 
-  // value representing unknown object
-  #define UNKNOWN ((csi_id_t)-1); 
+  // Value representing unknown CSI ID
+  #define UNKNOWN_CSI_ID ((csi_id_t)-1)
 
   typedef struct {
     csi_id_t num_bb;
     csi_id_t num_callsite;
     csi_id_t num_func;
-    csi_id_t num_func_exit; 
+    csi_id_t num_func_exit;
     csi_id_t num_load;
     csi_id_t num_store;
   } instrumentation_counts_t;
-  
+
   // Hooks to be defined by tool writer
   void __csi_init();
   void __csi_unit_init(const char * const file_name, const instrumentation_counts_t counts);
@@ -175,7 +175,7 @@ translation unit --- a source file, an object file, or a bitcode file --- loads.
 The ``file_name`` parameter provides the name of the source file corresponding
 to the translation unit.  The hook provides parameters for the number of each
 instrumentation type in the unit.  This allows a tool to prepare any data
-structures ahead of time.  
+structures ahead of time.
 
 When multiple translation units contribute to the TIX, the tool writer may not
 assume that the invocations of ``__csi_unit_init`` are called in any particular
@@ -190,22 +190,22 @@ CSI API: Functions
 
 CSI provides hooks for function entry and exit, shown below:
 
-.. code-block:: c++ 
-   
-  void __csi_func_entry(const csi_id_t func_id); 
+.. code-block:: c++
+
+  void __csi_func_entry(const csi_id_t func_id);
   void __csi_func_exit(const csi_id_t func_exit_id, const csi_id_t func_id);
 
 The hook ``__csi_func_entry`` is invoked at the beginning of every
 instrumented function instance after the function has been entered and
-initialized but before any user code has run.  The ``func_id`` parameter 
-identifies the function being entered or exited.  Correspondingly, the 
-hook ``__csi_func_exit`` is invoked just before the function returns 
+initialized but before any user code has run.  The ``func_id`` parameter
+identifies the function being entered or exited.  Correspondingly, the
+hook ``__csi_func_exit`` is invoked just before the function returns
 normally).  (We have not yet defined the API for exceptions.)
 The ``func_exit_id`` parameter allows the tool writer to distinguish the
 potentially multiple function exits, and the ``func_id`` ID identifies
 the function that the hook is in.
-  
-CSI API: Basic Blocks 
+
+CSI API: Basic Blocks
 ---------------------
 
 CSI also provide instrumentation hooks basic block entry and exit.
@@ -216,15 +216,15 @@ The API hooks for basic blocks are shown below:
 .. code-block:: c++
 
  void __csi_bb_entry(const csi_id_t bb_id);
- void __csi_bb_exit(const csi_id_t bb_id); 
+ void __csi_bb_exit(const csi_id_t bb_id);
 
-The hook ``__csi_bb_entry`` is called when control enters a basic block, 
+The hook ``__csi_bb_entry`` is called when control enters a basic block,
 and ``__csi_bb_exit`` is called just before control leaves the basic
 block.  The ``bb_id`` parameter identifies the entered or exited basic
-block.  The ``__csi_func_entry/exit`` and ``__csi_bb_entry/exit`` are 
-properly nested: before entering the first basic block in a function, 
+block.  The ``__csi_func_entry/exit`` and ``__csi_bb_entry/exit`` are
+properly nested: before entering the first basic block in a function,
 ``__csi_func_entry`` is invoked before ``__csi_bb_entry``; before
-returning from a function, ``__csi_bb_exit`` is invoked before 
+returning from a function, ``__csi_bb_exit`` is invoked before
 ``__csi_func_exit``.
 
 
@@ -238,12 +238,12 @@ CSI provides the following hooks for call sites:
   void __csi_before_call(const csi_id_t call_id, const csi_id_t func_id);
   void __csi_after_call(const csi_id_t call_id, const csi_id_t func_id);
 
-The ``call_id`` parameter identifies the call site, and the ``func_id`` 
-parameter identifies the called function.  Note that it may not always be 
+The ``call_id`` parameter identifies the call site, and the ``func_id``
+parameter identifies the called function.  Note that it may not always be
 possible to CSI to produce the function ID corresponds to the called function
 statically --- for example, if a function is called indirectly
-through a function pointer or if the function called is an uninstrumented 
-function.  In such scenarios, the value of the ``func_id`` will be 
+through a function pointer or if the function called is an uninstrumented
+function.  In such scenarios, the value of the ``func_id`` will be
 ``UNKNOWN``, a macro defined to have type ``csi_id_t`` with value ``-1``.
 
 CSI API: Memory Operations
@@ -257,9 +257,9 @@ CSI provides the following hooks for memory operations:
                          const int32_t num_bytes, const uint64_t prop);
   void __csi_after_load(const csi_id_t load_id, const void *addr,
                         const int32_t num_bytes, const uint64_t prop);
-  void __csi_before_store(const csi_id_t store_id, const void *addr, 
+  void __csi_before_store(const csi_id_t store_id, const void *addr,
                           const int32_t num_bytes, const uint64_t prop);
-  void __csi_after_store(const csi_id_t store_id, const void *addr, 
+  void __csi_after_store(const csi_id_t store_id, const void *addr,
                          const int32_t num_bytes, const uint64_t prop);
 
   // macros for property:
@@ -281,9 +281,9 @@ into other types of hooks.
 CSI API: Front-End Data (FED) Tables
 ------------------------------------
 
-CSI provides a front-end data (FED) table for each type of 
+CSI provides a front-end data (FED) table for each type of
 program objects to allow a tool to easily relate runtime events back to
-locations in the source code.  The FED tables are indexed by the program 
+locations in the source code.  The FED tables are indexed by the program
 object's ID.  The accessors for the FED tables are shown below:
 
 .. code-block:: c++
@@ -301,39 +301,39 @@ object's ID.  The accessors for the FED tables are shown below:
   source_loc_t const * __csi_get_call_source_loc(const csi_id_t call_id);
   source_loc_t const * __csi_get_load_source_loc(const csi_id_t load_id);
   source_loc_t const * __csi_get_store_source_loc(const csi_id_t store_id);
-    
+
 We describe the interface of the accessors for the basic-block FED table, and
 accessors for the other FED tables work similarly.  Given a ``bb_id``
 corresponding to a basic block, as the parameter passed into the hooks for the basic
 block entry and exit, ``__csi_get_bb_source_loc`` returns a ``struct`` that
 contains the source location of the basic block, including the filename of the
-translation unit that the basic block belongs to and its begin (inclusive) line 
-numbers.  The type for the line number is signed, which permits an error value of 
+translation unit that the basic block belongs to and its begin (inclusive) line
+numbers.  The type for the line number is signed, which permits an error value of
 ``-1`` for when the line-number information is not available.
 
 Currently the FED tables are initialized by default, which incurs some runtime
 overhead.  We are considering providing explicit initialization calls for the
 FED tables in the future as an optimization, which allows the runtime to
 optimize away the cost of FED table initialization unless the tool explicitly
-request a particular FED table to be initialized. 
+request a particular FED table to be initialized.
 
 
 Limitations
 -----------
 
 * One limitation to LTO is that, it cannot fully optimize dynamic libraries,
-  since dynamic libraries must be compiled as position independent code (PIC), 
-  and as the compiler cannot predict runtime addresses within the library, 
-  it must invoke tool-provided hooks as PIC function calls.  In these cases, 
-  LTO can sometimes fail to perform optimization to eliminate null hooks or 
-  dead code within the hooks.  To be conservative and avoid these penalties, 
+  since dynamic libraries must be compiled as position independent code (PIC),
+  and as the compiler cannot predict runtime addresses within the library,
+  it must invoke tool-provided hooks as PIC function calls.  In these cases,
+  LTO can sometimes fail to perform optimization to eliminate null hooks or
+  dead code within the hooks.  To be conservative and avoid these penalties,
   libraries should be statically linked with the TIX.
 
-* On systems where LTO is not used, the TIX produced by linking a program with 
-  a CSI tool will still function correctly, but might not be optimized.  Null 
+* On systems where LTO is not used, the TIX produced by linking a program with
+  a CSI tool will still function correctly, but might not be optimized.  Null
   hooks might not be elided, for example, meaning that linking an instrumented
-  program-under-test with the null tool might produce a slower executable than 
-  if CSI instrumentation were not inserted.  
+  program-under-test with the null tool might produce a slower executable than
+  if CSI instrumentation were not inserted.
 
 * CSI currently does not support instrumentation for exceptions and C++11 atomics.
 
@@ -343,22 +343,22 @@ Current Status
 
 This is the first release of CSI.  It has been tested with large C++ programs,
 such as the Apache HTTP server (version 2.4.17), but we don't promise that it's
-bug free.  
+bug free.
 
 We are actively working on enhancing the CSI framework, and we have a few minor
 milestones and major milestones planned.  The minor milestones that we are
 actively developing include the following:
 
 * Incorporate more properties to expose additional compiler analyses and other
-  information known at compile time, such as whether a memory access is a 
+  information known at compile time, such as whether a memory access is a
   constant, whether a variable accessed is captured, and such.
 
 * Extend properties to other types of hooks.
-  
+
 * Incorporate more detailed information into the FED tables.  Specifically, the
-  return type ``source_loc_t`` struct currently contains only the begin source 
-  line number.  We plan to include also the end (exclusive) line number, the begin 
-  and end column numbers.  
+  return type ``source_loc_t`` struct currently contains only the begin source
+  line number.  We plan to include also the end (exclusive) line number, the begin
+  and end column numbers.
 
 The major milestones that we are considering include:
 
@@ -366,6 +366,5 @@ The major milestones that we are considering include:
 
 * Add instrumentation for C++11 atomics.
 
-* Providing additional static information such as how the program objects relate to 
-  each other.   
-
+* Providing additional static information such as how the program objects relate to
+  each other.
