@@ -4,48 +4,24 @@ Comprehensive Static Instrumentation
 Introduction
 ------------
 
-The CSI framework provides comprehensive static instrumentation
-through the compiler in order to simplify the task of building
-efficient and effective platform-independent tools.  CSI inserts
-instrumentation hooks at salient locations throughout the compiled
-code of a program-under-test, such as function entry and exit points,
-basic-block entry and exit point, before and after each memory
-operation, etc.  Tool writers can instrument a program-under-test
-simply by first writing a library that defines the relevant hooks and
-statically linking their compiled library with the program-under-test.
-
-How to build
-------------
-
-The CSI framework is built for LLVM (extending LLVM 3.8 up to commit
-9c64d50), referred to as CSI:LLVM.  CSI:LLVM is open-source software
-released under the University of Illinois Open Source License, and the
-code is published on GitHub.
-
-To ensure high performance of CSI tools, CSI:LLVM ideally should be
-configured to enable link-time optimization (LTO), and the GNU ``gold
-linker`` is a prerequisite for enabling LTO for CSI:LLVM.  (See
-`http://llvm.org/docs/LinkTimeOptimization.html` for more detail on
-LLVM LTO.)
-
-The CSI:LLVM distribution includes a a build script that will
-automatically clone and build LLVM with the correct options to enable
-CSI.  The script assumes that the GNU gold linker is installed and
-will output an error if it cannot be found.
-
-To build CSI, execute the following commands:
-
-.. code-block:: bash
-
-  % git clone --recursive git@github.com:csi-llvm/llvm.git
-  % cd llvm/csi
-  (possibly edit build.sh to update path to gold linker and its plugin-api.h)
-  % ./build.sh
+CSI:LLVM is a framework providing comprehensive static instrumentation via the
+compiler in order to simplify the task of building efficient and effective
+platform-independent dynamic-analysis tools.  The CSI:LLVM compiler pass inserts
+instrumentation hooks at salient locations throughout the compiled code of a
+program-under-test, such as function entry and exit points, basic-block entry
+and exit point, before and after each memory operation, etc.  Tool writers can
+instrument a program-under-test simply by first writing a library that defines
+the relevant hooks and statically linking their compiled library with the
+program-under-test.
 
 Supported Platforms
 -------------------
 
-CSI is supported on Linux x86_64 (tested on UBuntu 14.04 x86_64).
+CSI is currently only supported on Linux x86_64 (tested on UBuntu 14.04 x86_64).
+To ensure high performance of CSI tools, CSI:LLVM ideally should be configured
+to enable link-time optimization (LTO), and the GNU ``gold linker`` is a
+prerequisite for enabling LTO for CSI:LLVM.  (See
+`http://llvm.org/docs/LinkTimeOptimization.html` for more detail on LLVM LTO.)
 
 Usage: Create a CSI tool
 ------------------------
@@ -54,23 +30,23 @@ To create a CSI tool, add ``#include <csi.h>`` at the top of the tool source
 and implement function bodies for the hooks relevant to the tool.
 
 To build the tool object file suitable for linking with an instrumented
-program-under-test (assuming the tool source file is named ``my_tool.cpp``),
+program-under-test (assuming the tool source file is named ``my-tool.cpp``),
 execute the following:
 
 .. code-block:: bash
 
-  % clang++ -c -emit-llvm null_tool.cpp -o null_tool.o
-  % clang++ -c -emit-llvm my_tool.cpp -o my_tool.o
-  % llvm-link my_tool.o null_tool.o -o my_tool.o
+  % clang++ -c -emit-llvm null-tool.c -o null-tool.o
+  % clang++ -c -emit-llvm my-tool.cpp -o my-tool.o
+  % llvm-link my-tool.o null-tool.o -o my-tool.o
 
-The ``null_tool.cpp`` is provided as part of the CSI distribution (under
-``llvm/projects/compiler-rt/test/csi/toolkit/null_tool.cpp``) which consists
-of null hooks that simply return.  Linking ``my_tool`` with ``null_tool``
+The ``null-tool.c`` file is provided as part of the CSI distribution (under
+``llvm/projects/compiler-rt/test/csi/tools/null-tool.c``) which consists
+of null hooks that simply return.  Linking ``my-tool`` with ``null-tool``
 allows the LTO to later elide hooks irrelevant to the tool entirely from the
 program-under-test.
 
 The LLVM/Clang used to build the tool does not have to be CSI:LLVM, as long
-as it generates LLVM bitcodes compatible with CSI:LLVM.
+as it generates LLVM bitcode compatible with CSI:LLVM.
 
 Usage: Create a CSI instrumented program-under-test
 ---------------------------------------------------
@@ -86,22 +62,24 @@ one needs to do the following:
   object files.
 * During the linking stage for the TIX, add additional arguments
   ``-fuse-ld=gold`` and ``-flto`` and add the tool object file (e.g.
-  ``my_tool.o``) to be statically linked to the TIX.
+  ``my-tool.o``) to be statically linked to the TIX.
 
 For example, say we want to instrument a program that consists of two files
-``foo.cpp`` and ``bar.cpp`` and link the program with a CSI tool ``my_tool.o``
+``foo.cpp`` and ``bar.cpp`` and link the program with a CSI tool ``my-tool.o``
 (built as shown above), execute the following:
 
 .. code-block:: bash
 
   % clang++ -c -O3 -g -fcsi -emit-llvm foo.cpp -o foo.o
   % clang++ -c -O3 -g -fcsi -emit-llvm bar.cpp -o bar.o
-  % clang++ foo.o bar.o my_tool.o /usr/lib/clang/3.3/lib/linux/libclang_rt.csi-x86_64.a -fuse-ld=gold -flto -lrt -ldl -o foo
+  % clang++ foo.o bar.o my-tool.o libclang_rt.csi-x86_64.a -fuse-ld=gold -flto -lrt -ldl -o foo
 
-Notice that in the final stage of linking, the tool user also needs to link
-in the static library of the CSI runtime to produce the final TIX.  We plan to
-investigate means of linking with the runtime automatically in the future, but
-for the time being, the tool user should link it in explicitly.
+Notice that in the final stage of linking, the tool user also needs to link in
+the static library of the CSI runtime to produce the final TIX.  The runtime
+archive is distributed under the ``build/lib/clang/<VERSION>/lib/<OS>``
+directory. We plan to investigate means of linking with the runtime
+automatically in the future, but for the time being, the tool user should link
+it in explicitly.
 
 CSI API Overview
 ----------------
@@ -291,7 +269,7 @@ object's ID.  The accessors for the FED tables are shown below:
 
   typedef struct {
     char * filename;
-    int32_t begin_line_number;
+    int32_t line_number;
   } source_loc_t;
 
   // Accessors for various CSI FED tables.
