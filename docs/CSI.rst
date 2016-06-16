@@ -96,7 +96,12 @@ For example, say we want to instrument a program that consists of two files
 
   % clang++ -c -O3 -g -fcsi -emit-llvm foo.cpp -o foo.o
   % clang++ -c -O3 -g -fcsi -emit-llvm bar.cpp -o bar.o
-  % clang++ foo.o bar.o my_tool.o -fuse-ld=gold -flto -lrt -ldl -o foo 
+  % clang++ foo.o bar.o my_tool.o /usr/lib/clang/3.3/lib/linux/libclang_rt.csi-x86_64.a -fuse-ld=gold -flto -lrt -ldl -o foo 
+
+Notice that in the final stage of linking, the tool user also needs to link
+in the static library of the CSI runtime to produce the final TIX.  We plan to
+investigate means of linking with the runtime automatically in the future, but
+for the time being, the tool user should link it in explicitly.
 
 CSI API Overview
 ----------------
@@ -137,6 +142,9 @@ CSI provides two initialization hooks, shown below:
 .. code-block:: c++
 
   typedef int64_t csi_id_t; 
+
+  // value representing unknown object
+  #define UNKNOWN ((csi_id_t)-1); 
 
   typedef struct {
     csi_id_t num_bb;
@@ -255,26 +263,20 @@ CSI provides the following hooks for memory operations:
                          const int32_t num_bytes, const uint64_t prop);
 
   // macros for property:
-  #define ACC_IS_VOLATILE(prop)                   (prop & 0x01) 
-  #define ACC_IS_NOT_SHARED(prop)                 (prop & 0x02)
-  #define LOAD_IS_VTABLE(prop)                    (prop & 0x04)
-  #define LOAD_IS_CONST(prop)                     (prop & 0x08)
-  #define LOAD_IS_READ_BEFORE_WRITE_IN_BB(prop)   (prop & 0x10)
+  #define LOAD_IS_READ_BEFORE_WRITE_IN_BB   0x1
 
-The hooks ``__csi_before_load`` and ``__csi_after_load`` are called before 
-and after memory loads, respectively, and likewise, ``__csi_before_store`` 
-and ``__csi_after_store`` are called before and after memory stores.
-The parameter ``addr`` is the address of the memory accessed, and
-``num_bytes`` is the number of bytes loaded or stored.  The
-``prop`` parameter is a property: a 64-bit unsigned integer
-that CSI uses to export the results of compiler analysis and other
-information known at compile time.  A particular property of the
-memory operation is encoded as a bit field in ``prop``, which can
-be accessed via property macros defined by CSI, such as whether the
-target of a load is constant, whether a load is volatile, whether the
-location is guaranteed not to be shared (useful for race detection),
-etc.
-
+The hooks ``__csi_before_load`` and ``__csi_after_load`` are called before and
+after memory loads, respectively, and likewise, ``__csi_before_store`` and
+``__csi_after_store`` are called before and after memory stores.  The parameter
+``addr`` is the address of the memory accessed, and ``num_bytes`` is the number
+of bytes loaded or stored.  The ``prop`` parameter is a property: a 64-bit
+unsigned integer that CSI uses to export the results of compiler analysis and
+other information known at compile time.  A particular property of the memory
+operation is encoded as a bit field in ``prop``, which can be checked against
+the property macros defined by CSI.  Currently, the only property implemented is
+whether a load is a read-before-write within the basic block enclosing it.  We
+plan to extend the CSI to include more property values and incorporate property
+into other types of hooks.
 
 CSI API: Front-End Data (FED) Tables
 ------------------------------------
@@ -289,7 +291,6 @@ object's ID.  The accessors for the FED tables are shown below:
   typedef struct {
     char * filename;
     int32_t begin_line_number;
-    int32_t end_line_number;
   } source_loc_t;
 
   // Accessors for various CSI FED tables.
@@ -306,10 +307,9 @@ accessors for the other FED tables work similarly.  Given a ``bb_id``
 corresponding to a basic block, as the parameter passed into the hooks for the basic
 block entry and exit, ``__csi_get_bb_source_loc`` returns a ``struct`` that
 contains the source location of the basic block, including the filename of the
-translation unit that the basic block belongs to and its begin (inclusive) and
-end (exclusive) line numbers.  The type for the line number is signed, which
-permits an error value of ``-1`` for when the line-number information is not
-available.
+translation unit that the basic block belongs to and its begin (inclusive) line 
+numbers.  The type for the line number is signed, which permits an error value of 
+``-1`` for when the line-number information is not available.
 
 Currently the FED tables are initialized by default, which incurs some runtime
 overhead.  We are considering providing explicit initialization calls for the
@@ -345,8 +345,27 @@ This is the first release of CSI.  It has been tested with large C++ programs,
 such as the Apache HTTP server (version 2.4.17), but we don't promise that it's
 bug free.  
 
-We are actively working on enhancing the CSI framework, including adding
-instrumentation for exceptions and atomics, supporting more properties to expose
-useful information from compiler analyses, and providing other kinds of static
-information such as how the program objects relate to each other.   
+We are actively working on enhancing the CSI framework, and we have a few minor
+milestones and major milestones planned.  The minor milestones that we are
+actively developing include the following:
+
+* Incorporate more properties to expose additional compiler analyses and other
+  information known at compile time, such as whether a memory access is a 
+  constant, whether a variable accessed is captured, and such.
+
+* Extend properties to other types of hooks.
+  
+* Incorporate more detailed information into the FED tables.  Specifically, the
+  return type ``source_loc_t`` struct currently contains only the begin source 
+  line number.  We plan to include also the end (exclusive) line number, the begin 
+  and end column numbers.  
+
+The major milestones that we are considering include:
+
+* Add instrumentation for exceptions.
+
+* Add instrumentation for C++11 atomics.
+
+* Providing additional static information such as how the program objects relate to 
+  each other.   
 
