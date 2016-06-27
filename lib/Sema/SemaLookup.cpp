@@ -1078,32 +1078,35 @@ bool Sema::CppLookupName(LookupResult &R, Scope *S) {
 
   for (; S && !isNamespaceOrTranslationUnitScope(S); S = S->getParent()) {
     DeclContext *Ctx = S->getEntity();
-
+    bool SearchNamespaceScope = true;
     // Check whether the IdResolver has anything in this scope.
-    bool Found = false;
     for (; I != IEnd && S->isDeclScope(*I); ++I) {
       if (NamedDecl *ND = R.getAcceptableDecl(*I)) {
-        if (NameKind == LookupRedeclarationWithLinkage) {
+        if (NameKind == LookupRedeclarationWithLinkage &&
+            !(*I)->isTemplateParameter()) {
+          // If it's a template parameter, we still find it, so we can diagnose
+          // the invalid redeclaration.
+
           // Determine whether this (or a previous) declaration is
           // out-of-scope.
           if (!LeftStartingScope && !Initial->isDeclScope(*I))
             LeftStartingScope = true;
 
           // If we found something outside of our starting scope that
-          // does not have linkage, skip it. If it's a template parameter,
-          // we still find it, so we can diagnose the invalid redeclaration.
-          if (LeftStartingScope && !((*I)->hasLinkage()) &&
-              !(*I)->isTemplateParameter()) {
+          // does not have linkage, skip it.
+          if (LeftStartingScope && !((*I)->hasLinkage())) {
             R.setShadowed();
             continue;
           }
+        } else {
+          // We found something in this scope, we should not look at the
+          // namespace scope
+          SearchNamespaceScope = false;
         }
-
-        Found = true;
         R.addDecl(ND);
       }
     }
-    if (Found) {
+    if (!SearchNamespaceScope) {
       R.resolveKind();
       if (S->isClassScope())
         if (CXXRecordDecl *Record = dyn_cast_or_null<CXXRecordDecl>(Ctx))
@@ -4149,10 +4152,8 @@ TypoCorrectionConsumer::NamespaceSpecifierSet::NamespaceSpecifierSet(
   // Build the list of identifiers that would be used for an absolute
   // (from the global context) NestedNameSpecifier referring to the current
   // context.
-  for (DeclContextList::reverse_iterator C = CurContextChain.rbegin(),
-                                         CEnd = CurContextChain.rend();
-       C != CEnd; ++C) {
-    if (NamespaceDecl *ND = dyn_cast_or_null<NamespaceDecl>(*C))
+  for (DeclContext *C : llvm::reverse(CurContextChain)) {
+    if (auto *ND = dyn_cast_or_null<NamespaceDecl>(C))
       CurContextIdentifiers.push_back(ND->getIdentifier());
   }
 
@@ -4180,13 +4181,11 @@ unsigned
 TypoCorrectionConsumer::NamespaceSpecifierSet::buildNestedNameSpecifier(
     DeclContextList &DeclChain, NestedNameSpecifier *&NNS) {
   unsigned NumSpecifiers = 0;
-  for (DeclContextList::reverse_iterator C = DeclChain.rbegin(),
-                                      CEnd = DeclChain.rend();
-       C != CEnd; ++C) {
-    if (NamespaceDecl *ND = dyn_cast_or_null<NamespaceDecl>(*C)) {
+  for (DeclContext *C : llvm::reverse(DeclChain)) {
+    if (auto *ND = dyn_cast_or_null<NamespaceDecl>(C)) {
       NNS = NestedNameSpecifier::Create(Context, NNS, ND);
       ++NumSpecifiers;
-    } else if (RecordDecl *RD = dyn_cast_or_null<RecordDecl>(*C)) {
+    } else if (auto *RD = dyn_cast_or_null<RecordDecl>(C)) {
       NNS = NestedNameSpecifier::Create(Context, NNS, RD->isTemplateDecl(),
                                         RD->getTypeForDecl());
       ++NumSpecifiers;
@@ -4203,10 +4202,9 @@ void TypoCorrectionConsumer::NamespaceSpecifierSet::addNameSpecifier(
   DeclContextList FullNamespaceDeclChain(NamespaceDeclChain);
 
   // Eliminate common elements from the two DeclContext chains.
-  for (DeclContextList::reverse_iterator C = CurContextChain.rbegin(),
-                                      CEnd = CurContextChain.rend();
-       C != CEnd && !NamespaceDeclChain.empty() &&
-       NamespaceDeclChain.back() == *C; ++C) {
+  for (DeclContext *C : llvm::reverse(CurContextChain)) {
+    if (NamespaceDeclChain.empty() || NamespaceDeclChain.back() != C)
+      break;
     NamespaceDeclChain.pop_back();
   }
 

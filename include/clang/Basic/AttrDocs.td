@@ -524,8 +524,8 @@ def NoDebugDocs : Documentation {
   let Category = DocCatVariable;
   let Content = [{
 The ``nodebug`` attribute allows you to suppress debugging information for a
-function, or for a variable declared with static storage duration, such as
-globals, class static data members, and static locals.
+function or method, or for a variable that is not a parameter or a non-static
+data member.
   }];
 }
 
@@ -2431,5 +2431,20 @@ def LTOVisibilityDocs : Documentation {
   let Category = DocCatType;
   let Content = [{
 See :doc:`LTOVisibility`.
+  }];
+}
+
+def RenderScriptKernelAttributeDocs : Documentation {
+  let Category = DocCatFunction;
+  let Content = [{
+``__attribute__((kernel))`` is used to mark a ``kernel`` function in
+RenderScript.
+
+In RenderScript, ``kernel`` functions are used to express data-parallel
+computations.  The RenderScript runtime efficiently parallelizes ``kernel``
+functions to run on computational resources such as multi-core CPUs and GPUs.
+See the RenderScript_ documentation for more information.
+
+.. _RenderScript: https://developer.android.com/guide/topics/renderscript/compute.html
   }];
 }
