@@ -2344,7 +2344,8 @@ bool CompilerInvocation::CreateFromArgs(CompilerInvocation &Res,
     LangOpts.PIE = Args.hasArg(OPT_pic_is_pie);
     parseSanitizerKinds("-fsanitize=", Args.getAllArgValues(OPT_fsanitize_EQ),
                         Diags, LangOpts.Sanitize);
-    Res.getLangOpts()->ComprehensiveStaticInstrumentation = Args.hasArg(OPT_fcsi);
+    Res.getLangOpts()->ComprehensiveStaticInstrumentation =
+        Args.hasArg(OPT_fcsi);
   } else {
     // Other LangOpts are only initialzed when the input is not AST or LLVM IR.
     ParseLangArgs(LangOpts, Args, DashX, Res.getTargetOpts(),

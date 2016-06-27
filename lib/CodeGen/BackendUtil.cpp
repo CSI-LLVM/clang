@@ -264,11 +264,6 @@ static void addDataFlowSanitizerPass(const PassManagerBuilder &Builder,
   PM.add(createDataFlowSanitizerPass(LangOpts.SanitizerBlacklistFiles));
 }
 
-static void addComprehensiveStaticInstrumentationPass(const PassManagerBuilder &Builder,
-                                                      PassManagerBase &PM) {
-  PM.add(createComprehensiveStaticInstrumentationPass());
-}
-
 static void addEfficiencySanitizerPass(const PassManagerBuilder &Builder,
                                        legacy::PassManagerBase &PM) {
   const PassManagerBuilderWrapper &BuilderWrapper =
@@ -280,6 +275,12 @@ static void addEfficiencySanitizerPass(const PassManagerBuilder &Builder,
   else if (LangOpts.Sanitize.has(SanitizerKind::EfficiencyWorkingSet))
     Opts.ToolType = EfficiencySanitizerOptions::ESAN_WorkingSet;
   PM.add(createEfficiencySanitizerPass(Opts));
+}
+
+static void
+addComprehensiveStaticInstrumentationPass(const PassManagerBuilder &Builder,
+                                          PassManagerBase &PM) {
+  PM.add(createComprehensiveStaticInstrumentationPass());
 }
 
 static TargetLibraryInfoImpl *createTLII(llvm::Triple &TargetTriple,
@@ -450,18 +451,18 @@ void EmitAssemblyHelper::CreatePasses(ModuleSummaryIndex *ModuleSummary) {
                            addDataFlowSanitizerPass);
   }
 
-  if (LangOpts.ComprehensiveStaticInstrumentation) {
-    PMBuilder.addExtension(PassManagerBuilder::EP_OptimizerLast,
-                           addComprehensiveStaticInstrumentationPass);
-    PMBuilder.addExtension(PassManagerBuilder::EP_EnabledOnOptLevel0,
-                           addComprehensiveStaticInstrumentationPass);
-  }
-
   if (LangOpts.Sanitize.hasOneOf(SanitizerKind::Efficiency)) {
     PMBuilder.addExtension(PassManagerBuilder::EP_OptimizerLast,
                            addEfficiencySanitizerPass);
     PMBuilder.addExtension(PassManagerBuilder::EP_EnabledOnOptLevel0,
                            addEfficiencySanitizerPass);
+  }
+
+  if (LangOpts.ComprehensiveStaticInstrumentation) {
+    PMBuilder.addExtension(PassManagerBuilder::EP_OptimizerLast,
+                           addComprehensiveStaticInstrumentationPass);
+    PMBuilder.addExtension(PassManagerBuilder::EP_EnabledOnOptLevel0,
+                           addComprehensiveStaticInstrumentationPass);
   }
 
   // Set up the per-function pass manager.
