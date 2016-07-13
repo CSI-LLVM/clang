@@ -280,6 +280,17 @@ void CodeGenFunction::EmitStmt(const Stmt *S) {
   case Stmt::OMPTargetUpdateDirectiveClass:
     EmitOMPTargetUpdateDirective(cast<OMPTargetUpdateDirective>(*S));
     break;
+  case Stmt::OMPDistributeParallelForDirectiveClass:
+    EmitOMPDistributeParallelForDirective(
+        cast<OMPDistributeParallelForDirective>(*S));
+    break;
+  case Stmt::OMPDistributeParallelForSimdDirectiveClass:
+    EmitOMPDistributeParallelForSimdDirective(
+        cast<OMPDistributeParallelForSimdDirective>(*S));
+    break;
+  case Stmt::OMPDistributeSimdDirectiveClass:
+    EmitOMPDistributeSimdDirective(cast<OMPDistributeSimdDirective>(*S));
+    break;
   }
 }
 
@@ -602,7 +613,14 @@ void CodeGenFunction::EmitIfStmt(const IfStmt &S) {
     RunCleanupsScope ThenScope(*this);
     EmitStmt(S.getThen());
   }
-  EmitBranch(ContBlock);
+  {
+    auto CurBlock = Builder.GetInsertBlock();
+    EmitBranch(ContBlock);
+    // Eliminate any empty blocks that may have been created by nested
+    // control flow statements in the 'then' clause.
+    if (CurBlock)
+      SimplifyForwardingBlocks(CurBlock); 
+  }
 
   // Emit the 'else' code if present.
   if (const Stmt *Else = S.getElse()) {
@@ -618,7 +636,12 @@ void CodeGenFunction::EmitIfStmt(const IfStmt &S) {
     {
       // There is no need to emit line number for an unconditional branch.
       auto NL = ApplyDebugLocation::CreateEmpty(*this);
+      auto CurBlock = Builder.GetInsertBlock();
       EmitBranch(ContBlock);
+      // Eliminate any empty blocks that may have been created by nested
+      // control flow statements emitted in the 'else' clause.
+      if (CurBlock)
+        SimplifyForwardingBlocks(CurBlock); 
     }
   }
 

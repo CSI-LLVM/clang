@@ -96,6 +96,14 @@ static const char *getSparcAsmModeForCPU(StringRef Name,
           .Case("niagara2", "-Av8plusb")
           .Case("niagara3", "-Av8plusd")
           .Case("niagara4", "-Av8plusd")
+          .Case("leon2", "-Av8")
+          .Case("at697e", "-Av8")
+          .Case("at697f", "-Av8")
+          .Case("leon3", "-Av8")
+          .Case("ut699", "-Av8")
+          .Case("gr712rc", "-Av8")
+          .Case("leon4", "-Av8")
+          .Case("gr740", "-Av8")
           .Default("-Av8");
   }
 }
@@ -1738,9 +1746,6 @@ static void getSparcTargetFeatures(const Driver &D, const ArgList &Args,
 
 void Clang::AddSparcTargetArgs(const ArgList &Args,
                                ArgStringList &CmdArgs) const {
-  //const Driver &D = getToolChain().getDriver();
-  std::string Triple = getToolChain().ComputeEffectiveClangTriple(Args);
-
   sparc::FloatABI FloatABI =
       sparc::getSparcFloatABI(getToolChain().getDriver(), Args);
 
@@ -2247,12 +2252,10 @@ void Clang::AddX86TargetArgs(const ArgList &Args,
   }
 
   // Set flags to support MCU ABI.
-  if (Arg *A = Args.getLastArg(options::OPT_miamcu, options::OPT_mno_iamcu)) {
-    if (A->getOption().matches(options::OPT_miamcu)) {
-      CmdArgs.push_back("-mfloat-abi");
-      CmdArgs.push_back("soft");
-      CmdArgs.push_back("-mstack-alignment=4");
-    }
+  if (Args.hasFlag(options::OPT_miamcu, options::OPT_mno_iamcu, false)) {
+    CmdArgs.push_back("-mfloat-abi");
+    CmdArgs.push_back("soft");
+    CmdArgs.push_back("-mstack-alignment=4");
   }
 }
 
@@ -2352,7 +2355,7 @@ static bool DecodeAArch64Mcpu(const Driver &D, StringRef Mcpu, StringRef &CPU,
   CPU = Split.first;
   if (CPU == "cortex-a53" || CPU == "cortex-a57" ||
       CPU == "cortex-a72" || CPU == "cortex-a35" || CPU == "exynos-m1" ||
-      CPU == "kryo"       || CPU == "cortex-a73") {
+      CPU == "kryo"       || CPU == "cortex-a73" || CPU == "vulcan") {
     Features.push_back("+neon");
     Features.push_back("+crc");
     Features.push_back("+crypto");
@@ -5115,6 +5118,43 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-arm-restrict-it");
   }
 
+  // Forward -cl options to -cc1
+  if (Args.getLastArg(options::OPT_cl_opt_disable)) {
+    CmdArgs.push_back("-cl-opt-disable");
+  }
+  if (Args.getLastArg(options::OPT_cl_strict_aliasing)) {
+    CmdArgs.push_back("-cl-strict-aliasing");
+  }
+  if (Args.getLastArg(options::OPT_cl_single_precision_constant)) {
+    CmdArgs.push_back("-cl-single-precision-constant");
+  }
+  if (Args.getLastArg(options::OPT_cl_finite_math_only)) {
+    CmdArgs.push_back("-cl-finite-math-only");
+  }
+  if (Args.getLastArg(options::OPT_cl_kernel_arg_info)) {
+    CmdArgs.push_back("-cl-kernel-arg-info");
+  }
+  if (Args.getLastArg(options::OPT_cl_unsafe_math_optimizations)) {
+    CmdArgs.push_back("-cl-unsafe-math-optimizations");
+  }
+  if (Args.getLastArg(options::OPT_cl_fast_relaxed_math)) {
+    CmdArgs.push_back("-cl-fast-relaxed-math");
+  }
+  if (Args.getLastArg(options::OPT_cl_mad_enable)) {
+    CmdArgs.push_back("-cl-mad-enable");
+  }
+  if (Args.getLastArg(options::OPT_cl_no_signed_zeros)) {
+    CmdArgs.push_back("-cl-no-signed-zeros");
+  }
+  if (Arg *A = Args.getLastArg(options::OPT_cl_std_EQ)) {
+    std::string CLStdStr = "-cl-std=";
+    CLStdStr += A->getValue();
+    CmdArgs.push_back(Args.MakeArgString(CLStdStr));
+  }
+  if (Args.getLastArg(options::OPT_cl_denorms_are_zero)) {
+    CmdArgs.push_back("-cl-denorms-are-zero");
+  }
+
   // Forward -f options with positive and negative forms; we translate
   // these by hand.
   if (Arg *A = Args.getLastArg(options::OPT_fprofile_sample_use_EQ)) {
@@ -6233,12 +6273,18 @@ void Clang::AddClangCLArgs(const ArgList &Args, types::ID InputType,
     CmdArgs.push_back(Args.MakeArgString(Twine(LangOptions::SSPStrong)));
   }
 
-  // Emit CodeView if -Z7 is present.
-  *EmitCodeView = Args.hasArg(options::OPT__SLASH_Z7);
-  if (*EmitCodeView)
-    *DebugInfoKind = codegenoptions::LimitedDebugInfo;
-  if (*EmitCodeView)
+  // Emit CodeView if -Z7 or -Zd are present.
+  if (Arg *DebugInfoArg =
+          Args.getLastArg(options::OPT__SLASH_Z7, options::OPT__SLASH_Zd)) {
+    *EmitCodeView = true;
+    if (DebugInfoArg->getOption().matches(options::OPT__SLASH_Z7))
+      *DebugInfoKind = codegenoptions::LimitedDebugInfo;
+    else
+      *DebugInfoKind = codegenoptions::DebugLineTablesOnly;
     CmdArgs.push_back("-gcodeview");
+  } else {
+    *EmitCodeView = false;
+  }
 
   const Driver &D = getToolChain().getDriver();
   EHFlags EH = parseClangCLEHFlags(D, Args);
@@ -9922,9 +9968,14 @@ void visualstudio::Linker::ConstructJob(Compilation &C, const JobAction &JA,
                                            WindowsSdkLibPath.c_str()));
   }
 
+  if (!C.getDriver().IsCLMode() && Args.hasArg(options::OPT_L))
+    for (const auto &LibPath : Args.getAllArgValues(options::OPT_L))
+      CmdArgs.push_back(Args.MakeArgString("-libpath:" + LibPath));
+
   CmdArgs.push_back("-nologo");
 
-  if (Args.hasArg(options::OPT_g_Group, options::OPT__SLASH_Z7))
+  if (Args.hasArg(options::OPT_g_Group, options::OPT__SLASH_Z7,
+                  options::OPT__SLASH_Zd))
     CmdArgs.push_back("-debug");
 
   bool DLL = Args.hasArg(options::OPT__SLASH_LD, options::OPT__SLASH_LDd,
@@ -11109,6 +11160,12 @@ void NVPTX::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
   assert(gpu_archs.size() == 1 && "Exactly one GPU Arch required for ptxas.");
   const std::string& gpu_arch = gpu_archs[0];
 
+  // Check that our installation's ptxas supports gpu_arch.
+  if (!Args.hasArg(options::OPT_no_cuda_version_check)) {
+    TC.cudaInstallation().CheckCudaVersionSupportsArch(
+        StringToCudaArch(gpu_arch));
+  }
+
   ArgStringList CmdArgs;
   CmdArgs.push_back(TC.getTriple().isArch64Bit() ? "-m64" : "-m32");
   if (Args.hasFlag(options::OPT_cuda_noopt_device_debug,
@@ -11185,9 +11242,10 @@ void NVPTX::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     auto* A = cast<const CudaDeviceAction>(II.getAction());
     // We need to pass an Arch of the form "sm_XX" for cubin files and
     // "compute_XX" for ptx.
-    const char *Arch = (II.getType() == types::TY_PP_Asm)
-                           ? A->getComputeArchName()
-                           : A->getGpuArchName();
+    const char *Arch =
+        (II.getType() == types::TY_PP_Asm)
+            ? CudaVirtualArchToString(VirtualArchForCudaArch(A->getGpuArch()))
+            : CudaArchToString(A->getGpuArch());
     CmdArgs.push_back(Args.MakeArgString(llvm::Twine("--image=profile=") +
                                          Arch + ",file=" + II.getFilename()));
   }

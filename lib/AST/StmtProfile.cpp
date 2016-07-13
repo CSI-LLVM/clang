@@ -529,6 +529,10 @@ void OMPClauseProfiler::VisitOMPToClause(const OMPToClause *C) {
 void OMPClauseProfiler::VisitOMPFromClause(const OMPFromClause *C) {
   VisitOMPClauseList(C);
 }
+void OMPClauseProfiler::VisitOMPUseDevicePtrClause(
+    const OMPUseDevicePtrClause *C) {
+  VisitOMPClauseList(C);
+}
 }
 
 void
@@ -697,6 +701,21 @@ void OMPClauseProfiler::VisitOMPDefaultmapClause(const OMPDefaultmapClause *) {}
 void StmtProfiler::VisitOMPTargetUpdateDirective(
     const OMPTargetUpdateDirective *S) {
   VisitOMPExecutableDirective(S);
+}
+
+void StmtProfiler::VisitOMPDistributeParallelForDirective(
+    const OMPDistributeParallelForDirective *S) {
+  VisitOMPLoopDirective(S);
+}
+
+void StmtProfiler::VisitOMPDistributeParallelForSimdDirective(
+    const OMPDistributeParallelForSimdDirective *S) {
+  VisitOMPLoopDirective(S);
+}
+
+void StmtProfiler::VisitOMPDistributeSimdDirective(
+    const OMPDistributeSimdDirective *S) {
+  VisitOMPLoopDirective(S);
 }
 
 void StmtProfiler::VisitExpr(const Expr *S) {
@@ -1280,6 +1299,12 @@ void StmtProfiler::VisitCXXConstructExpr(const CXXConstructExpr *S) {
   VisitExpr(S);
   VisitDecl(S->getConstructor());
   ID.AddBoolean(S->isElidable());
+}
+
+void StmtProfiler::VisitCXXInheritedCtorInitExpr(
+    const CXXInheritedCtorInitExpr *S) {
+  VisitExpr(S);
+  VisitDecl(S->getConstructor());
 }
 
 void StmtProfiler::VisitCXXFunctionalCastExpr(const CXXFunctionalCastExpr *S) {

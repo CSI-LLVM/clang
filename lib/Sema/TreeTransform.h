@@ -1176,7 +1176,8 @@ public:
   StmtResult RebuildIfStmt(SourceLocation IfLoc, bool IsConstexpr,
                            Sema::ConditionResult Cond, Stmt *Then,
                            SourceLocation ElseLoc, Stmt *Else) {
-    return getSema().ActOnIfStmt(IfLoc, IsConstexpr, Cond, Then, ElseLoc, Else);
+    return getSema().ActOnIfStmt(IfLoc, IsConstexpr, nullptr, Cond, Then,
+                                 ElseLoc, Else);
   }
 
   /// \brief Start building a new switch statement.
@@ -1185,7 +1186,7 @@ public:
   /// Subclasses may override this routine to provide different behavior.
   StmtResult RebuildSwitchStmtStart(SourceLocation SwitchLoc,
                                     Sema::ConditionResult Cond) {
-    return getSema().ActOnStartOfSwitchStmt(SwitchLoc, Cond);
+    return getSema().ActOnStartOfSwitchStmt(SwitchLoc, nullptr, Cond);
   }
 
   /// \brief Attach the body to the switch statement.
@@ -1778,6 +1779,18 @@ public:
                                   SourceLocation EndLoc) {
     return getSema().ActOnOpenMPFromClause(VarList, StartLoc, LParenLoc,
                                            EndLoc);
+  }
+
+  /// Build a new OpenMP 'use_device_ptr' clause.
+  ///
+  /// By default, performs semantic analysis to build the new OpenMP clause.
+  /// Subclasses may override this routine to provide different behavior.
+  OMPClause *RebuildOMPUseDevicePtrClause(ArrayRef<Expr *> VarList,
+                                          SourceLocation StartLoc,
+                                          SourceLocation LParenLoc,
+                                          SourceLocation EndLoc) {
+    return getSema().ActOnOpenMPUseDevicePtrClause(VarList, StartLoc, LParenLoc,
+                                                   EndLoc);
   }
 
   /// \brief Rebuild the operand to an Objective-C \@synchronized statement.
@@ -2690,6 +2703,16 @@ public:
                                            ParenRange);
   }
 
+  /// \brief Build a new implicit construction via inherited constructor
+  /// expression.
+  ExprResult RebuildCXXInheritedCtorInitExpr(QualType T, SourceLocation Loc,
+                                             CXXConstructorDecl *Constructor,
+                                             bool ConstructsVBase,
+                                             bool InheritedFromVBase) {
+    return new (getSema().Context) CXXInheritedCtorInitExpr(
+        Loc, T, Constructor, ConstructsVBase, InheritedFromVBase);
+  }
+
   /// \brief Build a new object-construction expression.
   ///
   /// By default, performs semantic analysis to build the new expression.
@@ -3316,8 +3339,6 @@ bool TreeTransform<Derived>::TransformExprs(Expr *const *Inputs,
         if (Out.isInvalid())
           return true;
 
-        // FIXME: Can this happen? We should not try to expand the pack
-        // in this case.
         if (Out.get()->containsUnexpandedParameterPack()) {
           Out = getDerived().RebuildPackExpansion(
               Out.get(), Expansion->getEllipsisLoc(), OrigNumExpansions);
@@ -4810,6 +4831,14 @@ bool TreeTransform<Derived>::TransformFunctionTypeParams(
           QualType NewType = getDerived().TransformType(Pattern);
           if (NewType.isNull())
             return true;
+
+          if (NewType->containsUnexpandedParameterPack()) {
+            NewType =
+                getSema().getASTContext().getPackExpansionType(NewType, None);
+
+            if (NewType.isNull())
+              return true;
+          }
 
           if (ParamInfos)
             PInfos.set(OutParamTypes.size(), ParamInfos[i]);
@@ -7526,6 +7555,40 @@ StmtResult TreeTransform<Derived>::TransformOMPDistributeDirective(
   return Res;
 }
 
+template <typename Derived>
+StmtResult TreeTransform<Derived>::TransformOMPDistributeParallelForDirective(
+    OMPDistributeParallelForDirective *D) {
+  DeclarationNameInfo DirName;
+  getDerived().getSema().StartOpenMPDSABlock(
+      OMPD_distribute_parallel_for, DirName, nullptr, D->getLocStart());
+  StmtResult Res = getDerived().TransformOMPExecutableDirective(D);
+  getDerived().getSema().EndOpenMPDSABlock(Res.get());
+  return Res;
+}
+
+template <typename Derived>
+StmtResult
+TreeTransform<Derived>::TransformOMPDistributeParallelForSimdDirective(
+    OMPDistributeParallelForSimdDirective *D) {
+  DeclarationNameInfo DirName;
+  getDerived().getSema().StartOpenMPDSABlock(
+      OMPD_distribute_parallel_for_simd, DirName, nullptr, D->getLocStart());
+  StmtResult Res = getDerived().TransformOMPExecutableDirective(D);
+  getDerived().getSema().EndOpenMPDSABlock(Res.get());
+  return Res;
+}
+
+template <typename Derived>
+StmtResult TreeTransform<Derived>::TransformOMPDistributeSimdDirective(
+    OMPDistributeSimdDirective *D) {
+  DeclarationNameInfo DirName;
+  getDerived().getSema().StartOpenMPDSABlock(OMPD_distribute_simd, DirName,
+                                             nullptr, D->getLocStart());
+  StmtResult Res = getDerived().TransformOMPExecutableDirective(D);
+  getDerived().getSema().EndOpenMPDSABlock(Res.get());
+  return Res;
+}
+
 //===----------------------------------------------------------------------===//
 // OpenMP clause transformation
 //===----------------------------------------------------------------------===//
@@ -8037,6 +8100,21 @@ OMPClause *TreeTransform<Derived>::TransformOMPFromClause(OMPFromClause *C) {
   }
   return getDerived().RebuildOMPFromClause(Vars, C->getLocStart(),
                                            C->getLParenLoc(), C->getLocEnd());
+}
+
+template <typename Derived>
+OMPClause *TreeTransform<Derived>::TransformOMPUseDevicePtrClause(
+    OMPUseDevicePtrClause *C) {
+  llvm::SmallVector<Expr *, 16> Vars;
+  Vars.reserve(C->varlist_size());
+  for (auto *VE : C->varlists()) {
+    ExprResult EVar = getDerived().TransformExpr(cast<Expr>(VE));
+    if (EVar.isInvalid())
+      return nullptr;
+    Vars.push_back(EVar.get());
+  }
+  return getDerived().RebuildOMPUseDevicePtrClause(
+      Vars, C->getLocStart(), C->getLParenLoc(), C->getLocEnd());
 }
 
 //===----------------------------------------------------------------------===//
@@ -9924,6 +10002,32 @@ TreeTransform<Derived>::TransformCXXConstructExpr(CXXConstructExpr *E) {
                                               E->requiresZeroInitialization(),
                                               E->getConstructionKind(),
                                               E->getParenOrBraceRange());
+}
+
+template<typename Derived>
+ExprResult TreeTransform<Derived>::TransformCXXInheritedCtorInitExpr(
+    CXXInheritedCtorInitExpr *E) {
+  QualType T = getDerived().TransformType(E->getType());
+  if (T.isNull())
+    return ExprError();
+
+  CXXConstructorDecl *Constructor = cast_or_null<CXXConstructorDecl>(
+      getDerived().TransformDecl(E->getLocStart(), E->getConstructor()));
+  if (!Constructor)
+    return ExprError();
+
+  if (!getDerived().AlwaysRebuild() &&
+      T == E->getType() &&
+      Constructor == E->getConstructor()) {
+    // Mark the constructor as referenced.
+    // FIXME: Instantiation-specific
+    SemaRef.MarkFunctionReferenced(E->getLocStart(), Constructor);
+    return E;
+  }
+
+  return getDerived().RebuildCXXInheritedCtorInitExpr(
+      T, E->getLocation(), Constructor,
+      E->constructsVBase(), E->inheritedFromVBase());
 }
 
 /// \brief Transform a C++ temporary-binding expression.

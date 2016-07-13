@@ -1218,6 +1218,15 @@ void ASTStmtWriter::VisitCXXConstructExpr(CXXConstructExpr *E) {
   Code = serialization::EXPR_CXX_CONSTRUCT;
 }
 
+void ASTStmtWriter::VisitCXXInheritedCtorInitExpr(CXXInheritedCtorInitExpr *E) {
+  VisitExpr(E);
+  Record.AddDeclRef(E->getConstructor());
+  Record.AddSourceLocation(E->getLocation());
+  Record.push_back(E->constructsVBase());
+  Record.push_back(E->inheritedFromVBase());
+  Code = serialization::EXPR_CXX_INHERITED_CTOR_INIT;
+}
+
 void ASTStmtWriter::VisitCXXTemporaryObjectExpr(CXXTemporaryObjectExpr *E) {
   VisitCXXConstructExpr(E);
   Record.AddTypeSourceInfo(E->getTypeSourceInfo());
@@ -2131,6 +2140,14 @@ void OMPClauseWriter::VisitOMPFromClause(OMPFromClause *C) {
   }
 }
 
+void OMPClauseWriter::VisitOMPUseDevicePtrClause(OMPUseDevicePtrClause *C) {
+  Record.push_back(C->varlist_size());
+  Record.AddSourceLocation(C->getLParenLoc());
+  for (auto *VE : C->varlists()) {
+    Record.AddStmt(VE);
+  }
+}
+
 //===----------------------------------------------------------------------===//
 // OpenMP Directives.
 //===----------------------------------------------------------------------===//
@@ -2169,6 +2186,10 @@ void ASTStmtWriter::VisitOMPLoopDirective(OMPLoopDirective *D) {
     Record.AddStmt(D->getNextLowerBound());
     Record.AddStmt(D->getNextUpperBound());
     Record.AddStmt(D->getNumIterations());
+  }
+  if (isOpenMPLoopBoundSharingDirective(D->getDirectiveKind())) {
+    Record.AddStmt(D->getPrevLowerBoundVariable());
+    Record.AddStmt(D->getPrevUpperBoundVariable());
   }
   for (auto I : D->counters()) {
     Record.AddStmt(I);
@@ -2415,6 +2436,24 @@ void ASTStmtWriter::VisitOMPTargetUpdateDirective(OMPTargetUpdateDirective *D) {
   Record.push_back(D->getNumClauses());
   VisitOMPExecutableDirective(D);
   Code = serialization::STMT_OMP_TARGET_UPDATE_DIRECTIVE;
+}
+
+void ASTStmtWriter::VisitOMPDistributeParallelForDirective(
+    OMPDistributeParallelForDirective *D) {
+  VisitOMPLoopDirective(D);
+  Code = serialization::STMT_OMP_DISTRIBUTE_PARALLEL_FOR_DIRECTIVE;
+}
+
+void ASTStmtWriter::VisitOMPDistributeParallelForSimdDirective(
+    OMPDistributeParallelForSimdDirective *D) {
+  VisitOMPLoopDirective(D);
+  Code = serialization::STMT_OMP_DISTRIBUTE_PARALLEL_FOR_SIMD_DIRECTIVE;
+}
+
+void ASTStmtWriter::VisitOMPDistributeSimdDirective(
+    OMPDistributeSimdDirective *D) {
+  VisitOMPLoopDirective(D);
+  Code = serialization::STMT_OMP_DISTRIBUTE_SIMD_DIRECTIVE;
 }
 
 //===----------------------------------------------------------------------===//
