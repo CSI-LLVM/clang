@@ -716,6 +716,8 @@ def fsanitize_undefined_strip_path_components_EQ : Joined<["-"], "fsanitize-unde
 def fcsi : Flag<["-"], "fcsi">, Group<f_clang_Group>,
            Flags<[CC1Option, CoreOption]>, MetaVarName<"<check>">,
            HelpText<"Turn Comprehensive Static Instrumentation.">;
+def fcsi_EQ : Joined<["-"], "fcsi=">, Group<f_clang_Group>, Flags<[CC1Option, CoreOption]>, MetaVarName<"<tool.bc>">,
+  HelpText<"Turn Comprehensive Static Instrumentation and use the given tool bitcode.">;
 def funsafe_math_optimizations : Flag<["-"], "funsafe-math-optimizations">,
   Group<f_Group>;
 def fno_unsafe_math_optimizations : Flag<["-"], "fno-unsafe-math-optimizations">,

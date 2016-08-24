@@ -126,6 +126,9 @@ public:
   /// host code generation.
   std::string OMPHostIRFile;
 
+  /// \brief Tool bitcode file for CSI.
+  std::string ComprehensiveStaticInstrumentationTool;
+
   LangOptions();
 
   // Define accessors/mutators for language options of enumeration type.

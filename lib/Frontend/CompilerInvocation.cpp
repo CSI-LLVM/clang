@@ -2146,7 +2146,9 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
       getLastArgIntValue(Args, OPT_fsanitize_address_field_padding, 0, Diags);
   Opts.SanitizerBlacklistFiles = Args.getAllArgValues(OPT_fsanitize_blacklist);
 
+  // Parse -fcsi and the optional tool bitcode argument.
   Opts.ComprehensiveStaticInstrumentation = Args.hasArg(OPT_fcsi);
+  Opts.ComprehensiveStaticInstrumentationTool = Args.getLastArgValue(OPT_fcsi_EQ);
 }
 
 static void ParsePreprocessorArgs(PreprocessorOptions &Opts, ArgList &Args,
@@ -2360,12 +2362,19 @@ bool CompilerInvocation::CreateFromArgs(CompilerInvocation &Res,
     parseSanitizerKinds("-fsanitize=", Args.getAllArgValues(OPT_fsanitize_EQ),
                         Diags, LangOpts.Sanitize);
     Res.getLangOpts()->ComprehensiveStaticInstrumentation = Args.hasArg(OPT_fcsi);
+    Res.getLangOpts()->ComprehensiveStaticInstrumentationTool = Args.getLastArgValue(OPT_fcsi_EQ);
   } else {
     // Other LangOpts are only initialzed when the input is not AST or LLVM IR.
     ParseLangArgs(LangOpts, Args, DashX, Res.getTargetOpts(),
       Res.getPreprocessorOpts(), Diags);
     if (Res.getFrontendOpts().ProgramAction == frontend::RewriteObjC)
       LangOpts.ObjCExceptions = 1;
+  }
+
+  if (LangOpts.ComprehensiveStaticInstrumentation && LangOpts.ComprehensiveStaticInstrumentationTool != "") {
+    // Link in the tool bitcode file from -fcsi=<tool>
+    unsigned LinkFlags = llvm::Linker::Flags::None;
+    Res.getCodeGenOpts().LinkBitcodeFiles.push_back(std::make_pair(LinkFlags, LangOpts.ComprehensiveStaticInstrumentationTool));
   }
 
   if (LangOpts.CUDA) {

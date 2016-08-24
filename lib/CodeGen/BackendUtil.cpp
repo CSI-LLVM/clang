@@ -266,7 +266,10 @@ static void addDataFlowSanitizerPass(const PassManagerBuilder &Builder,
 
 static void addComprehensiveStaticInstrumentationPass(const PassManagerBuilder &Builder,
                                                       PassManagerBase &PM) {
-  PM.add(createComprehensiveStaticInstrumentationPass());
+  const PassManagerBuilderWrapper &BuilderWrapper =
+      static_cast<const PassManagerBuilderWrapper&>(Builder);
+  const LangOptions &LangOpts = BuilderWrapper.getLangOpts();
+  PM.add(createComprehensiveStaticInstrumentationPass(LangOpts.ComprehensiveStaticInstrumentationTool));
 }
 
 static void addEfficiencySanitizerPass(const PassManagerBuilder &Builder,
@@ -450,8 +453,14 @@ void EmitAssemblyHelper::CreatePasses(ModuleSummaryIndex *ModuleSummary) {
   }
 
   if (LangOpts.ComprehensiveStaticInstrumentation) {
-    PMBuilder.addExtension(PassManagerBuilder::EP_OptimizerLast,
-                           addComprehensiveStaticInstrumentationPass);
+    if (LangOpts.ComprehensiveStaticInstrumentationTool == "") {
+      PMBuilder.addExtension(PassManagerBuilder::EP_OptimizerLast,
+                             addComprehensiveStaticInstrumentationPass);
+    } else {
+      // In CSI:CTO mode, we want to be as early as possible.
+      PMBuilder.addExtension(PassManagerBuilder::EP_EarlyAsPossible,
+                             addComprehensiveStaticInstrumentationPass);
+    }
     PMBuilder.addExtension(PassManagerBuilder::EP_EnabledOnOptLevel0,
                            addComprehensiveStaticInstrumentationPass);
   }
